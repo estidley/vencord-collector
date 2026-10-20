@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "discord-data-package"
+      ]
+    },
+    "accountId": {
+      "type": "string",
+      "pattern": "^[0-9]{1,20}$"
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "guild-channel",
+            "guild-thread",
+            "dm",
+            "group-dm",
+            "unknown"
+          ]
+        },
+        "guildId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "guildName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "channelId": {
+          "type": "string",
+          "pattern": "^[0-9]{1,20}$"
+        },
+        "channelName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parentChannelId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threadId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "participantIds": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "guildId",
+        "guildName",
+        "channelId",
+        "channelName",
+        "parentChannelId",
+        "threadId",
+        "participantIds"
+      ],
+      "additionalProperties": false
+    },
+    "allowedSenderIds": {
+      "minItems": 1,
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9]{1,20}$"
+      }
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 300
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "retentionDays": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30
+    },
+    "allowExport": {
+      "type": "boolean"
+    },
+    "principalId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]{1,100}$"
+    }
+  },
+  "required": [
+    "source",
+    "accountId",
+    "provenance",
+    "allowedSenderIds",
+    "purpose",
+    "expiresAt",
+    "retentionDays",
+    "allowExport",
+    "principalId"
+  ],
+  "additionalProperties": false
+}

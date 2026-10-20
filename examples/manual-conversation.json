@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "accountId": "100000000000000001",
+  "provenance": {
+    "kind": "dm", "guildId": null, "guildName": null,
+    "channelId": "200000000000000001", "channelName": null,
+    "parentChannelId": null, "threadId": null,
+    "participantIds": ["100000000000000001"]
+  },
+  "messages": [
+    { "messageId": "300000000000000001", "senderId": "100000000000000001",
+      "createdAt": "2026-10-18T10:00:00Z", "editedAt": null,
+      "content": "Synthetic example: remember the Saturday project session." }
+  ]
+}

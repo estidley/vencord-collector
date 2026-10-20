@@ -1,0 +1,102 @@
+import { z } from "zod";
+
+export const MAX_INPUT_BYTES = 2 * 1024 * 1024;
+export const MAX_VAULT_BYTES = 8 * 1024 * 1024;
+export const id = z.string().regex(/^[0-9]{1,20}$/);
+export const instant = z.iso.datetime({ offset: true });
+export const source = z.enum(["manual", "discord-data-package"]);
+
+export const provenanceSchema = z.strictObject({
+    kind: z.enum(["guild-channel", "guild-thread", "dm", "group-dm", "unknown"]),
+    guildId: id.nullable(), guildName: z.string().max(200).nullable(),
+    channelId: id, channelName: z.string().max(200).nullable(),
+    parentChannelId: id.nullable(), threadId: id.nullable(),
+    participantIds: z.array(id).max(100)
+}).superRefine((p, c) => {
+    const bad = (message: string) => c.addIssue({ code: "custom", message });
+    if (p.kind.startsWith("guild-") && !p.guildId) bad("A server ID is required.");
+    if (p.kind === "guild-thread" && (!p.parentChannelId || p.threadId !== p.channelId))
+        bad("A thread uses its own channel ID and requires its parent channel ID.");
+    if (p.kind !== "guild-thread" && (p.parentChannelId || p.threadId)) bad("Only threads have parent/thread IDs.");
+    if ((p.kind === "dm" || p.kind === "group-dm") && (p.guildId || p.guildName)) bad("DMs have no server.");
+    if (new Set(p.participantIds).size !== p.participantIds.length) bad("Duplicate participant IDs.");
+});
+export type Provenance = z.infer<typeof provenanceSchema>;
+
+export const messageSchema = z.strictObject({
+    messageId: id, senderId: id, createdAt: instant,
+    editedAt: instant.nullable(), content: z.string().max(20_000)
+});
+export const manualInputSchema = z.strictObject({
+    version: z.literal(1), accountId: id, provenance: provenanceSchema,
+    messages: z.array(messageSchema).min(1).max(1000)
+});
+
+export const grantDraftSchema = z.strictObject({
+    source, accountId: id, provenance: provenanceSchema,
+    allowedSenderIds: z.array(id).min(1).max(100),
+    purpose: z.string().trim().min(5).max(300),
+    expiresAt: instant,
+    retentionDays: z.number().int().min(1).max(30),
+    allowExport: z.boolean(),
+    principalId: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/)
+}).superRefine((g, c) => {
+    if (g.source === "discord-data-package" && (g.allowedSenderIds.length !== 1 || g.allowedSenderIds[0] !== g.accountId))
+        c.addIssue({ code: "custom", message: "A data package contains only the account owner's messages." });
+});
+export const grantSchema = grantDraftSchema.safeExtend({
+    grantId: z.uuid(), grantedAt: instant,
+    authority: z.literal("user-attested"), revokedAt: instant.nullable()
+});
+export type Grant = z.infer<typeof grantSchema>;
+
+const baseEvent = {
+    version: z.literal(1), eventId: z.uuid(), messageId: id,
+    source: z.enum(["manual", "discord-data-package", "authorized-bot"]),
+    accountId: id, provenance: provenanceSchema,
+    provenanceEvidence: z.enum(["user-supplied", "authorized-source"]),
+    grantId: z.uuid(), observedAt: instant, expiresAt: instant,
+    sourceTimestamp: instant.nullable(), senderId: id.nullable()
+};
+export const eventSchema = z.discriminatedUnion("type", [
+    z.strictObject({ ...baseEvent, type: z.literal("message.snapshot"),
+        senderId: id, createdAt: instant, editedAt: instant.nullable(), content: z.string().max(20_000) }),
+    z.strictObject({ ...baseEvent, type: z.literal("message.create"),
+        source: z.literal("authorized-bot"), senderId: id, createdAt: instant, content: z.string().max(20_000).nullable() }),
+    z.strictObject({ ...baseEvent, type: z.literal("message.update"), source: z.literal("authorized-bot"),
+        // Missing content means unchanged/unavailable; an empty string is an actual supplied value.
+        patch: z.strictObject({ content: z.string().max(20_000).optional(), editedAt: instant.nullable().optional() }) }),
+    z.strictObject({ ...baseEvent, type: z.literal("message.delete"), source: z.literal("authorized-bot") })
+]);
+export type MessageEvent = z.infer<typeof eventSchema>;
+
+export const auditSchema = z.strictObject({
+    auditId: z.uuid(), at: instant,
+    action: z.enum(["grant", "import", "export", "revoke", "prune"]),
+    grantId: z.uuid().nullable(), count: z.number().int().nonnegative()
+});
+export const stateSchema = z.strictObject({
+    version: z.literal(1), grants: z.array(grantSchema).max(100),
+    records: z.array(z.strictObject({ digest: z.string().regex(/^[a-f0-9]{64}$/), event: eventSchema })).max(5000),
+    audit: z.array(auditSchema).max(500)
+});
+export type State = z.infer<typeof stateSchema>;
+export const batchSchema = z.strictObject({
+    protocol: z.literal("personal-coordination/ingest-file"), version: z.literal(1),
+    batchId: z.uuid(), createdAt: instant, expiresAt: instant,
+    audience: z.literal("personal-coordination-mcp"), principalId: z.string().min(1).max(100),
+    grant: grantSchema, events: z.array(eventSchema).min(1).max(5000)
+});
+export type Batch = z.infer<typeof batchSchema>;
+
+export function parseJson(text: string): unknown {
+    if (new TextEncoder().encode(text).byteLength > MAX_INPUT_BYTES) throw new Error("File exceeds the 2 MiB import limit.");
+    try { return JSON.parse(text); } catch { throw new Error("Invalid JSON file."); }
+}
+
+export function parseSafe<T>(schema: z.ZodType<T>, input: unknown): T {
+    const parsed = schema.safeParse(input);
+    // Never echo untrusted content, identifiers, or parser diagnostics into logs/UI errors.
+    if (!parsed.success) throw new Error("Invalid format or missing fields. See the documented examples.");
+    return parsed.data;
+}
