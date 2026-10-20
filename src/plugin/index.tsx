@@ -4,12 +4,15 @@ import { ChannelStore, GuildStore, React, SelectedChannelStore, UserStore } from
 import { Collector } from "../core/collector";
 import { channelProvenance, LiveCapture } from "../core/live";
 import { IndexedDbStorage } from "../core/storage";
+import { AlwaysOn } from "../core/always-on";
+import type { AutoProtection } from "../core/auto-config";
 import { createPanel } from "../ui/Panel";
 
-const collector = new Collector(new IndexedDbStorage());
+const storage = new IndexedDbStorage();
+const collector = new Collector(storage);
 collector.suspend();
 const live = new LiveCapture(collector, {
-    accountId: () => UserStore.getCurrentUser()?.id,
+    accountId: () => UserStore?.getCurrentUser()?.id,
     selectedChannelId: () => SelectedChannelStore.getChannelId(),
     provenance: channelId => {
         const accountId = UserStore.getCurrentUser()?.id;
@@ -19,11 +22,22 @@ const live = new LiveCapture(collector, {
         return channelProvenance(channel, accountId, guild?.name ?? null);
     }
 });
+const currentAccount = () => UserStore?.getCurrentUser()?.id;
+const always = new AlwaysOn(collector, live, storage,
+    () => typeof VencordNative !== "undefined" ? VencordNative.pluginHelpers?.MessageCollector as unknown as AutoProtection | undefined : undefined,
+    currentAccount);
+let watcher: ReturnType<typeof setInterval> | undefined;
+let observedAccount: string | undefined;
+function ready() {
+    const account = currentAccount();
+    if (observedAccount && account !== observedAccount) always.accountChanged();
+    observedAccount = account; live.checkAccount(); void always.restore();
+}
 let Panel: ReturnType<typeof createPanel> | undefined;
 
 function SettingsPanel() {
     // Vencord's React export is resolved after plugin modules load. Read it only at render time.
-    Panel ??= createPanel(React, collector, live);
+    Panel ??= createPanel(React, collector, live, always);
     return <Panel />;
 }
 
@@ -33,17 +47,24 @@ export default definePlugin({
     authors: [], // Private plugin: no invented Discord author ID.
     enabledByDefault: false,
     settingsAboutComponent: SettingsPanel,
-    start() { collector.resume(); globalThis.addEventListener?.("pagehide", stopSession); },
-    stop() { globalThis.removeEventListener?.("pagehide", stopSession); live.stop(); collector.suspend(); },
+    start() {
+        collector.resume(); always.activate(); observedAccount = undefined; ready();
+        watcher = setInterval(ready, 1000); if (typeof watcher === "object") watcher.unref?.();
+        globalThis.addEventListener?.("pagehide", stopSession);
+    },
+    stop() {
+        globalThis.removeEventListener?.("pagehide", stopSession); clearInterval(watcher);
+        void always.disable().catch(() => {}); always.shutdown(); collector.suspend();
+    },
     flux: {
         MESSAGE_CREATE: payload => live.receive("MESSAGE_CREATE", payload),
         MESSAGE_UPDATE: payload => live.receive("MESSAGE_UPDATE", payload),
         MESSAGE_DELETE: payload => live.receive("MESSAGE_DELETE", payload),
         MESSAGE_DELETE_BULK: payload => live.receive("MESSAGE_DELETE_BULK", payload),
-        LOGOUT: () => live.stop("Logged out. Capture stopped and buffer locked."),
-        CONNECTION_OPEN: () => live.checkAccount(),
-        CURRENT_USER_UPDATE: () => live.checkAccount()
+        LOGOUT: () => { observedAccount = undefined; always.accountChanged(); },
+        CONNECTION_OPEN: ready,
+        CURRENT_USER_UPDATE: ready
     }
 });
 
-function stopSession() { live.stop(); }
+function stopSession() { clearInterval(watcher); always.shutdown(); }

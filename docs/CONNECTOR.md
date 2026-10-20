@@ -18,6 +18,8 @@ Permission `scope` defaults to `conversation` for older files. In that scope, pr
 
 **The passphrase authenticates ciphertext integrity, not a person's identity or legal authority.** A caller with the passphrase can create another valid envelope. The future receiver must authenticate the importing user and independently authorize the principal and scope. Do not turn a producer-supplied grant into an agent access token.
 
+Continuous live permissions add `continuous: true` and `expiresAt: null`; only `vencord-live` may use that combination. Older grants default to `continuous: false`. Events and batches always retain finite expiry timestamps. Receivers must explicitly recognize and authorize ongoing permissions; null grant expiry does not waive message retention. OS-protected auto-unlock credentials are never included in exports.
+
 ## Receiver requirements (not implemented here)
 
 1. Authenticate the owner/importer and resolve the principal in the receiver's own ACL. Check a revocation registry and declared purpose before accepting data. Apply stricter permissions when local and received policy differ.

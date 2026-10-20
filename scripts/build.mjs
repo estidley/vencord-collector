@@ -6,9 +6,10 @@ await mkdir("dist/messageCollector", { recursive: true });
 await build({ entryPoints: ["src/standalone.tsx"], outfile: "dist/standalone/app.js", bundle: true, format: "esm", target: "es2022", minify: true, define: { "process.env.NODE_ENV": '"production"' } });
 // A self-contained userplugin folder with only the two real Vencord imports left external.
 await build({ entryPoints: ["src/plugin/index.tsx"], outfile: "dist/messageCollector/index.tsx", bundle: true, format: "esm", target: "es2022", external: ["@utils/types", "@webpack/common"], jsx: "transform", banner: { js: "// SPDX-License-Identifier: GPL-3.0-or-later\n// Generated from src/. Do not edit this bundle.\n// @ts-nocheck" } });
+await build({ entryPoints: ["src/plugin/native.ts"], outfile: "dist/messageCollector/native.ts", bundle: true, platform: "node", format: "esm", target: "es2022", external: ["electron"], banner: { js: "// SPDX-License-Identifier: GPL-3.0-or-later\n// @ts-nocheck" } });
 await copyFile("LICENSE", "dist/messageCollector/LICENSE");
 await copyFile("docs/VENCORD.md", "dist/messageCollector/README.md");
-for (const name of ["SECURITY.md", "POLICY.md", "IMPORTS.md", "CONNECTOR.md"]) {
+for (const name of ["SECURITY.md", "POLICY.md", "IMPORTS.md", "CONNECTOR.md", "FLOW-REVIEW.md"]) {
     await copyFile(`docs/${name}`, `dist/messageCollector/${name}`);
 }
 await writeFile("dist/standalone/index.html", `<!doctype html>

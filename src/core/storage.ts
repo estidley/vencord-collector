@@ -6,7 +6,7 @@ export interface VaultStorage {
     compareAndSet(expected: number, envelope: Envelope): Promise<number>;
 }
 
-// One encrypted document; no conversation IDs, grants, or plaintext indexes on disk.
+// One encrypted vault plus an optional OS-protected auto-unlock record; no plaintext indexes.
 export class IndexedDbStorage implements VaultStorage {
     constructor(private name = "vencord-message-collector-v1") {}
     private connect(): Promise<IDBDatabase> {
@@ -25,6 +25,24 @@ export class IndexedDbStorage implements VaultStorage {
             const req = tx.objectStore("vault").get("current");
             tx.oncomplete = () => { db.close(); resolve(req.result as StoredVault | undefined); };
             tx.onabort = tx.onerror = () => { db.close(); reject(new Error("Unable to read local encrypted storage.")); };
+        });
+    }
+    async readAuto(): Promise<string | undefined> {
+        const db = await this.connect();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("vault", "readonly"); const req = tx.objectStore("vault").get("auto");
+            tx.oncomplete = () => { db.close(); const value = req.result; if (value !== undefined && (typeof value !== "string" || value.length > 16384)) reject(new Error("Invalid automatic-unlock record.")); else resolve(value); };
+            tx.onabort = tx.onerror = () => { db.close(); reject(new Error("Unable to read automatic-unlock settings.")); };
+        });
+    }
+    async writeAuto(ciphertext: string | undefined): Promise<void> {
+        if (ciphertext !== undefined && (!/^[A-Za-z0-9+/]+={0,2}$/.test(ciphertext) || ciphertext.length > 16384)) throw new Error("Invalid protected credential.");
+        const db = await this.connect();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("vault", "readwrite"); const store = tx.objectStore("vault");
+            if (ciphertext === undefined) store.delete("auto"); else store.put(ciphertext, "auto");
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onabort = tx.onerror = () => { db.close(); reject(new Error("Unable to update automatic-unlock settings.")); };
         });
     }
     async compareAndSet(expected: number, envelope: Envelope): Promise<number> {

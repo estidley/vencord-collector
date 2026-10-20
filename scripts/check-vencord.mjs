@@ -11,7 +11,7 @@ const config = resolve("dist/verification/vencord-source.json");
 await writeFile(config, JSON.stringify({
     extends: resolve(root, "tsconfig.json"),
     compilerOptions: { skipLibCheck: true, allowJs: false, rootDir: parse(resolve(".")).root },
-    include: [resolve("src/plugin/index.tsx"), ...["globals.d.ts", "modules.d.ts", "nativeModules.d.ts"].map(f => resolve(root, "src", f))]
+    include: [resolve("src/plugin/index.tsx"), resolve("src/plugin/native.ts"), ...["globals.d.ts", "modules.d.ts", "nativeModules.d.ts"].map(f => resolve(root, "src", f))]
 }, null, 2));
 const result = spawnSync(process.execPath, [resolve(root, "node_modules/typescript/bin/tsc"), "--noEmit", "-p", config], { stdio: "inherit" });
 if (result.error) throw result.error;

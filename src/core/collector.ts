@@ -1,6 +1,6 @@
 import { derive, digest, envelopeSchema, open, seal, type Envelope, type Secret } from "./crypto";
 import { parseImport } from "./importer";
-import { batchSchema, grantDraftSchema, liveObservationSchema, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
+import { batchSchema, grantDraftSchema, grantExpiry, liveObservationSchema, MAX_VAULT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
 import type { VaultStorage } from "./storage";
 
 const DAY = 86_400_000;
@@ -57,7 +57,7 @@ export class Collector {
     }
     private pruneState(state: State) {
         const before = state.records.length;
-        const activeIds = new Set(state.grants.filter(g => !g.revokedAt && Date.parse(g.expiresAt) > this.clock()).map(g => g.grantId));
+        const activeIds = new Set(state.grants.filter(g => !g.revokedAt && grantExpiry(g) > this.clock()).map(g => g.grantId));
         state.records = state.records.filter(r => Date.parse(r.event.expiresAt) > this.clock() && activeIds.has(r.event.grantId));
         const count = before - state.records.length;
         if (count) this.audit(state, "prune", null, count);
@@ -86,7 +86,7 @@ export class Collector {
     }
     private active(state: State, grantId: string): Grant {
         const grant = state.grants.find(g => g.grantId === grantId);
-        if (!grant || grant.revokedAt || Date.parse(grant.expiresAt) <= this.clock()) throw new Error("Permission is missing, expired, or revoked.");
+        if (!grant || grant.revokedAt || grantExpiry(grant) <= this.clock()) throw new Error("Permission is missing, expired, or revoked.");
         return grant;
     }
     status() {
@@ -98,8 +98,8 @@ export class Collector {
     async grant(input: unknown, attested: boolean): Promise<Grant> {
         if (attested !== true) throw new Error("Confirm your authority and permission for this specific conversation first.");
         const draft = parseSafe(grantDraftSchema, input);
-        const expires = Date.parse(draft.expiresAt);
-        if (expires <= this.clock() || expires > this.clock() + 30 * DAY) throw new Error("Permission must expire within the next 30 days.");
+        const expires = grantExpiry(draft);
+        if (!draft.continuous && (expires <= this.clock() || expires > this.clock() + 30 * DAY)) throw new Error("Permission must expire within the next 30 days.");
         return this.mutate(state => {
             if (state.grants.length >= 100) throw new Error("Permission history is full. Start a new browser profile after managing existing exports.");
             const grant: Grant = { ...draft, grantId: uid(), grantedAt: this.now(), authority: "user-attested", revokedAt: null };
@@ -133,7 +133,7 @@ export class Collector {
                 const event: MessageEvent = { version: 1, type: "message.snapshot", eventId: uid(), grantId,
                     source: grant.source, accountId: input.accountId, provenance: input.provenance,
                     provenanceEvidence: "user-supplied", observedAt: this.now(), sourceTimestamp: m.createdAt,
-                    expiresAt: new Date(Math.min(Date.parse(grant.expiresAt), this.clock() + grant.retentionDays * DAY)).toISOString(), ...m };
+                    expiresAt: new Date(Math.min(grantExpiry(grant), this.clock() + grant.retentionDays * DAY)).toISOString(), ...m };
                 state.records.push({ digest: hash, event }); known.add(hash); count++;
             }
             // Recheck expiry after asynchronous work. Invalid imports commit nothing.
@@ -189,7 +189,7 @@ export class Collector {
                 source: "vencord-live" as const, accountId, provenance,
                 provenanceEvidence: "client-observed" as const, grantId, observedAt: this.now(), senderId,
                 expiresAt: new Date(Math.min(previous ? Date.parse(previous.expiresAt) : Infinity,
-                    Date.parse(grant.expiresAt), this.clock() + grant.retentionDays * DAY)).toISOString() };
+                    grantExpiry(grant), this.clock() + grant.retentionDays * DAY)).toISOString() };
             let event: MessageEvent;
             if (input.type === "create") {
                 if (previous) return false;
@@ -211,10 +211,27 @@ export class Collector {
             state.records = state.records.filter(r => !(sameMessage(r.event) && (input.type === "delete" || r.event.source === "vencord-live")));
             state.records.push({ digest: await digest(event), event });
             this.active(state, grantId);
-            if (state.records.length > 5000) throw new Error("Buffer capacity reached. Live capture must stop.");
             this.audit(state, `live-${input.type}`, grantId, 1);
+            if (grant.continuous) {
+                // Only the explicitly continuous permission's oldest records roll out. Imports stay intact.
+                let count = 0;
+                while (state.records.length > 5000 || new TextEncoder().encode(JSON.stringify(state)).byteLength > MAX_VAULT_BYTES - 1024) {
+                    const index = state.records.findIndex(r => r.event.grantId === grantId && r.event.eventId !== event.eventId);
+                    if (index < 0) throw new Error("Other permissions fill the buffer. Free space before continuing.");
+                    state.records.splice(index, 1); count++;
+                }
+                if (count) this.audit(state, "capacity-prune", grantId, count);
+            }
+            if (state.records.length > 5000) throw new Error("Buffer capacity reached. Live capture must stop.");
             return true;
         });
+    }
+    async verifyPassphrase(passphrase: string): Promise<void> {
+        const epoch = this.epoch; this.check(epoch);
+        const stored = await this.storage.read();
+        if (!stored) throw new Error("Save an encrypted buffer before enabling automatic unlock.");
+        await open(stored.envelope, await derive(passphrase, stored.envelope.salt), "collector-vault/v1");
+        this.check(epoch);
     }
     async export(grantId: string, passphrase: string, confirmed: boolean): Promise<Envelope> {
         if (confirmed !== true) throw new Error("Confirm export to the named principal first.");

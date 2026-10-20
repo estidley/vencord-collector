@@ -1,6 +1,6 @@
 # Vencord compatibility artifact
 
-The generated `messageCollector` folder is a custom userplugin for opt-in live capture and file imports. It is disabled by default. Enabling it or unlocking the buffer does not start capture. Running a modified Discord client violates Discord's Terms of Service; this is an unofficial, at-your-own-risk route. The standalone app offers file imports without a client modification. This repository does not automatically install or inject Vencord.
+The generated `messageCollector` folder is a custom userplugin for opt-in live capture and file imports. It is disabled by default. The first setup requires a password and explicit acceptance; subsequently accepted always-on capture resumes automatically for the same account. Running a modified Discord client violates Discord's Terms of Service; this is an unofficial, at-your-own-risk route. The standalone app offers file imports without a client modification. This repository does not automatically install or inject Vencord.
 
 ## Current APIs inspected
 
@@ -11,7 +11,7 @@ Upstream: [Vendicated/Vencord](https://github.com/Vendicated/Vencord/tree/32c906
 - Cached `ChannelStore`, `GuildStore`, `SelectedChannelStore`, and `UserStore` supply provenance and the current account. No message store is enumerated, no history is requested, and no credential store is accessed.
 - [`src/webpack/common/index.ts`](https://github.com/Vendicated/Vencord/blob/32c90633ce6a95d7e56c95479efbb431bacf1eac/src/webpack/common/index.ts): common exports include React. The plugin uses the host's React rather than bundling another renderer.
 - [Basic Plugin Setup](https://docs.vencord.dev/plugins/): custom plugins live in `src/userplugins/<camelCaseName>/index.ts(x)` and are built with Vencord; they are not independently installable extensions.
-- [Native code](https://docs.vencord.dev/plugins/native/): native helpers can expose privileged operations. This implementation has no native helper, arbitrary file path API, or network bridge.
+- [Native code](https://docs.vencord.dev/plugins/native/): `native.ts` exposes only Windows credential protection/restore/availability through Electron safeStorage. It exposes no file paths, message access, or network bridge. Persistence remains in IndexedDB.
 
 ## Build review
 
@@ -29,11 +29,15 @@ Run `npm ci && npm run build` in this repository. The output `dist/messageCollec
 
 ## Choose a scope and start
 
+**Default Windows Desktop flow:** enter the buffer password once, read the scope, and press **Accept at my own risk and start collecting**. That single action confirms authority and risks and enables continuous account-wide collection. It remembers the password only inside an OS-encrypted record. It automatically resumes the same account when Discord restarts. No repeated acceptance or password entry is required while it remains enabled. **Stop collecting and forget password** disables restart and removes the remembered credential. A native helper is required, so copy the entire generated `messageCollector` folder, including `native.ts`, rebuild Vencord, and fully restart Discord after updating. Restarting only the renderer cannot load a new native helper.
+
+The main view shows capture status and record count. **Advanced** contains file imports, export, permissions, and the optional timed workflows described below. To enter those workflows without automatic capture, open **Advanced: unlock without collecting** on the password screen.
+
 For selected conversations, open the conversation first, click **Use current Discord conversation**, review the sender list/purpose/expiry, attest authority, and save. DM defaults include the account and current participants; guild defaults include only your own sender ID, which you can explicitly edit. Confirm the one-hour unlocked session, then **Start live capture**. Multiple selected conversations can share the same session deadline. DM membership changes stop selected capture for review.
 
 For all conversations, click **Allow all conversations — at my own risk**. Both authority and risk checkboxes are required before **Start all conversations for one hour** is enabled. Account scope includes all senders in supported DMs, group DMs, server text/news channels, text messages in voice/stage channels, and threads delivered to the signed-in account, including newly joined conversations. Forum/media posts use thread provenance. It stores one account-wide permission and actual provenance on each event, with seven-day retention/permission expiry and export off by default. Other channel types and events without attributable metadata are skipped. No voice/audio is recorded. It does not bypass access or client subscription limits. Stop the current session before switching between selected and all-conversations modes.
 
-Capture remains active with the panel closed or hidden only after an explicit start. The in-memory key remains available until the one-hour deadline (not extended by messages), an earlier permission expiry, stop/lock, logout/account change, plugin disable/reload, or failure. A restart/unlock never resumes capture. A storage or queue limit stops and locks instead of silently dropping old data; missed events are not recovered. The status shows selected-scope count or **ALL conversations**, saved changes, and the session deadline when the panel is open.
+Optional timed sessions remain active with the panel closed/hidden until their deadline, expiry, stop/lock, logout/account change, disable/reload, or failure; they do not auto-resume. Always-on sessions have no deadline and reuse one ongoing permission across restarts. Their messages retain a finite lifetime (seven days by default), and oldest continuous entries roll out at the 5,000-record / 8 MiB bound. Other permissions' imports are not evicted. Storage/queue failures still stop with an error; missed messages are not recovered. The panel distinguishes continuous collection from timed sessions. Platform rules and delivery gaps apply equally to both.
 
 Files can also be imported in this panel using a separate manual/data-package permission. Capture text is not rendered as HTML; attachment bodies/URLs and embeds are omitted. Live edits replace earlier live text. Observed deletes purge buffered copies across permissions and retain a content-free tombstone, only when the original sender is known and permitted. Unknown messages are not fetched to reconstruct edits or deletes.
 

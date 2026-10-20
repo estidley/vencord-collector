@@ -6,8 +6,9 @@ const built = await build({ entryPoints: ["tests/browser/live-host.tsx"], bundle
 const html = '<!doctype html><html><head><meta charset="utf-8"><title>Synthetic host</title></head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>';
 createServer((req, res) => {
     if (req.headers.host !== "127.0.0.1:4319" || req.method !== "GET") { res.writeHead(403); res.end(); return; }
-    if (req.url !== "/" && req.url !== "/app.js") { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { "Content-Type": req.url === "/" ? "text/html" : "text/javascript",
+    const path = new URL(req.url, "http://127.0.0.1:4319").pathname;
+    if (path !== "/" && path !== "/app.js") { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { "Content-Type": path === "/" ? "text/html" : "text/javascript",
         "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'none'; frame-ancestors 'none'" });
-    res.end(req.url === "/" ? html : built.outputFiles[0].text);
+    res.end(path === "/" ? html : built.outputFiles[0].text);
 }).listen(4319, "127.0.0.1");

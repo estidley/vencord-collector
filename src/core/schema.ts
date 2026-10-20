@@ -37,11 +37,13 @@ export const grantDraftSchema = z.strictObject({
     provenance: provenanceSchema.nullable(),
     allowedSenderIds: z.array(id).max(100),
     purpose: z.string().trim().min(5).max(300),
-    expiresAt: instant,
+    continuous: z.boolean().default(false), expiresAt: instant.nullable(),
     retentionDays: z.number().int().min(1).max(30),
     allowExport: z.boolean(),
     principalId: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/)
 }).superRefine((g, c) => {
+    if (g.continuous ? g.source !== "vencord-live" || g.expiresAt !== null : g.expiresAt === null)
+        c.addIssue({ code: "custom", message: "Only continuous live permissions may have no expiry." });
     if (g.scope === "account" && (g.source !== "vencord-live" || g.provenance !== null || g.allowedSenderIds.length !== 0))
         c.addIssue({ code: "custom", message: "Account scope is live-only, with per-event provenance and all senders." });
     if (g.scope === "conversation" && (!g.provenance || !g.allowedSenderIds.length))
@@ -54,6 +56,7 @@ export const grantSchema = grantDraftSchema.safeExtend({
     authority: z.literal("user-attested"), revokedAt: instant.nullable()
 });
 export type Grant = z.infer<typeof grantSchema>;
+export function grantExpiry(grant: { expiresAt: string | null }): number { return grant.expiresAt === null ? Infinity : Date.parse(grant.expiresAt); }
 
 export function permitsSender(grant: Grant, senderId: string): boolean {
     return grant.scope === "account" || grant.allowedSenderIds.includes(senderId);
@@ -86,7 +89,7 @@ export type MessageEvent = z.infer<typeof eventSchema>;
 
 export const auditSchema = z.strictObject({
     auditId: z.uuid(), at: instant,
-    action: z.enum(["grant", "import", "export", "revoke", "prune", "live-start", "live-create", "live-update", "live-delete"]),
+    action: z.enum(["grant", "import", "export", "revoke", "prune", "capacity-prune", "live-start", "live-create", "live-update", "live-delete"]),
     grantId: z.uuid().nullable(), count: z.number().int().nonnegative()
 });
 export const stateSchema = z.strictObject({

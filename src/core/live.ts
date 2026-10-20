@@ -1,5 +1,5 @@
 import { Collector } from "./collector";
-import { id, liveObservationSchema, MAX_INPUT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, type Grant, type LiveObservation, type Provenance } from "./schema";
+import { grantExpiry, id, liveObservationSchema, MAX_INPUT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, type Grant, type LiveObservation, type Provenance } from "./schema";
 
 export interface LiveHost {
     accountId(): string | undefined;
@@ -31,7 +31,7 @@ export class LiveCapture {
         collector.subscribe(() => {
             if (!collector.unlocked) { this.clear(); return; }
             if (this.grants.size) {
-                const valid = new Set(collector.status().grants.filter(g => !g.revokedAt && Date.parse(g.expiresAt) > this.clock()).map(g => g.grantId));
+                const valid = new Set(collector.status().grants.filter(g => !g.revokedAt && grantExpiry(g) > this.clock()).map(g => g.grantId));
                 for (const key of this.grants.keys()) if (!valid.has(key)) this.grants.delete(key);
                 if (!this.grants.size) { this.stop("Live permissions expired or were revoked."); return; }
             }
@@ -41,7 +41,7 @@ export class LiveCapture {
     subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
     private notify() { for (const listener of this.listeners) listener(); }
     get active() { return this.grants.size > 0 && this.collector.unlocked && this.clock() < this.deadline; }
-    status() { return { active: this.active, allConversations: [...this.grants.values()].some(g => g.scope === "account"), grantIds: [...this.grants.keys()], endsAt: this.deadline ? new Date(this.deadline).toISOString() : null, saved: this.saved, notice: this.notice }; }
+    status() { return { active: this.active, continuous: this.deadline === Infinity, allConversations: [...this.grants.values()].some(g => g.scope === "account"), grantIds: [...this.grants.keys()], endsAt: this.deadline && Number.isFinite(this.deadline) ? new Date(this.deadline).toISOString() : null, saved: this.saved, notice: this.notice }; }
     private clear() {
         this.generation++; this.grants.clear(); this.queue = []; this.queuedBytes = 0; this.account = undefined; this.deadline = 0;
         if (this.notice.startsWith("Capturing")) this.notice = "Live capture is off. Buffer locked.";
@@ -69,12 +69,12 @@ export class LiveCapture {
             retentionDays: 7, allowExport: false, principalId: "owner"
         };
     }
-    allDraft() {
+    allDraft(continuous = false) {
         const accountId = this.host.accountId();
         if (!accountId) throw new Error("Sign in to Discord before creating an account-wide permission.");
         return { source: "vencord-live", accountId: parseSafe(id, accountId), scope: "account", provenance: null,
             allowedSenderIds: [], purpose: "Personal conversation reference across all accessible conversations",
-            expiresAt: new Date(this.clock() + 7 * 86_400_000).toISOString(), retentionDays: 7,
+            continuous, expiresAt: continuous ? null : new Date(this.clock() + 7 * 86_400_000).toISOString(), retentionDays: 7,
             allowExport: false, principalId: "owner" };
     }
     async start(grantId: string, confirmed: boolean, allConfirmed = false) {
@@ -99,14 +99,16 @@ export class LiveCapture {
         const grant = await this.collector.beginLive(grantId, account, provenance);
         if (!this.collector.unlocked || generation !== this.generation) throw new Error("Live start was cancelled.");
         if (this.host.accountId() !== account) { this.stop("Account changed. Live start cancelled."); throw new Error("Account changed."); }
-        if (!this.grants.size) { this.deadline = this.clock() + HOUR; this.saved = 0; }
+        if (this.grants.size && candidate.continuous !== (this.deadline === Infinity)) throw new Error("Stop the session before changing its duration.");
+        if (!this.grants.size) { this.deadline = candidate.continuous ? Infinity : this.clock() + HOUR; this.saved = 0; }
         this.account = account; this.grants.set(grantId, grant);
         this.notice = candidate.scope === "account" ? "Capturing all conversations delivered to this account." : "Capturing selected conversations delivered to this client.";
         this.schedule(); this.notify();
     }
     private schedule() {
         clearTimeout(this.timer);
-        const end = Math.min(this.deadline, ...[...this.grants.values()].map(g => Date.parse(g.expiresAt)));
+        const end = Math.min(this.deadline, ...[...this.grants.values()].map(grantExpiry));
+        if (!Number.isFinite(end)) return;
         this.timer = setTimeout(() => {
             this.stop("Live session or permission expired. Buffer locked.");
         }, Math.max(0, end - this.clock()));
@@ -124,7 +126,7 @@ export class LiveCapture {
             if (typeof channelId !== "string") return;
             const grant = [...this.grants.values()].find(g => g.scope === "account" || g.provenance?.channelId === channelId);
             if (!grant) return; // Never copy or parse content outside an explicitly started conversation.
-            if (Date.parse(grant.expiresAt) <= this.clock()) { this.stop("Live permission expired."); return; }
+            if (grantExpiry(grant) <= this.clock()) { this.stop("Live permission expired."); return; }
             const observed = this.host.provenance(channelId);
             if (observed && !permitsProvenance(grant, observed)) { this.stop("Conversation membership or scope changed. Review a new permission."); return; }
             // Unsupported/unavailable channels cannot be attributed safely; account mode skips them.

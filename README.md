@@ -2,7 +2,7 @@
 
 Initial implementation of the Discord-side component of a four-repository personal coordination system. This is a new, independent Git repository. It has no Pulse dependencies and does not modify either Pulse repository.
 
-**Two capture paths:** explicitly started live Vencord sessions and user-selected local conversation files. Both use permissions, encrypted local buffering, and encrypted file handoff to a future `personal-coordination-mcp` receiver. The Vencord panel offers selected conversations or an **“Allow all conversations — at my own risk”** button. The standalone browser app supports file imports only.
+**Two capture paths:** always-on Vencord collection after one password and one acceptance, plus user-selected local conversation files. Both use permissions, encrypted buffering, and explicit encrypted file handoff to a future `personal-coordination-mcp` receiver. Selected conversations and timed sessions remain under Advanced. The standalone browser app supports file imports only.
 
 **Live capture is unofficial and at your own risk.** Vencord acknowledges that client modifications violate Discord's [Terms](https://discord.com/terms). Participant permission does not provide platform approval. Live mode observes events already delivered to the signed-in client; it never reads account credentials, opens a user-token session, sends messages, scans message history, or requests backfill. See [policy findings and official alternatives](docs/POLICY.md).
 
@@ -10,11 +10,13 @@ Initial implementation of the Discord-side component of a four-repository person
 
 Building this repository alone does not install the plugin. Follow [Vencord installation and usage](docs/VENCORD.md) to put `dist/messageCollector` into a Vencord source build, rebuild, and install that build. Then:
 
-1. Enable **MessageCollector** in Vencord and open its settings. Create/unlock the encrypted buffer.
-2. For one conversation, open it in Discord, click **Use current Discord conversation**, review the permission and allowed senders, attest your authority, and save. Confirm the unlocked session and press **Start live capture**.
-3. For the entire account, click **Allow all conversations — at my own risk**, read the scope, check both authority and risk confirmations, then press **Start all conversations for one hour**. This includes all senders and newly joined supported conversations delivered to the current account. Export defaults off.
-4. Keep Discord running. Capture continues while settings are closed/hidden, for up to one hour. **Stop live capture and lock**, logout, account changes, disable/reload, permission expiry, or storage/queue failures stop it. Unlocking never restarts capture automatically.
-5. File import remains available in the same Vencord panel using a separate file permission. The standalone app has a separate browser buffer; there is no automatic bridge between them.
+1. Enable **MessageCollector** in Vencord on Windows Desktop and open its settings.
+2. Enter a unique buffer password of at least 16 characters. Read the scope and press **Accept at my own risk and start collecting** once.
+3. Collection starts for all supported conversations delivered to this account and continues with settings closed or hidden. There is no one-hour limit. Discord restarts automatically unlock and resume for this account without another prompt. Windows protects the remembered password; no plaintext password is stored.
+4. **Stop collecting and forget password** stops immediately, removes automatic unlock, and stays off after restart. Logout/account changes pause capture; the saved permission applies only to the originally accepted account. Plugin disable also removes automatic unlock.
+5. File imports, exports, individual permissions and optional one-hour sessions remain under **Advanced**. The standalone app supports files only and has a separate browser buffer.
+
+Always-on permission lasts until revoked. Messages are not retained forever: the default is seven days, with at most 5,000 records / 8 MiB in the vault. Continuous mode rolls out its oldest entries when full, preserving unrelated imports. Storage errors, queue overflow, or a vault filled by other permissions still stop capture with an error. There is no claim of lossless collection or an unlimited archive. See [security boundaries](docs/SECURITY.md) and [adversarial flow review](docs/FLOW-REVIEW.md).
 
 Only events delivered to this client can be captured. Unsubscribed channels and offline periods can have gaps, even with account-wide capture. No historical extraction, attachments, search service, or automatic MCP upload is implemented.
 
@@ -44,10 +46,10 @@ The fixture at [examples/manual-conversation.json](examples/manual-conversation.
 |---|---|
 | Provenance | Server/channel/thread parent/DM/group DM IDs, optional names and participant IDs; unknown metadata stays null; user-supplied provenance is labeled |
 | Events | Imported snapshots and live create/update/delete events; edits replace buffered live text and observed deletes purge buffered copies; per-event provenance and timestamps |
-| Permissions | Selected conversation/senders or explicitly acknowledged whole-account live scope; account binding, purpose, principal, at most 30 days, local-only default |
+| Permissions | Selected or whole-account scope; ongoing live grants last until revoked; ordinary grants expire within 30 days; account binding and local-only default |
 | Buffer | Whole-document AES-256-GCM, PBKDF2-SHA256, 600,000 iterations, fresh salt/IV, memory-only non-extractable keys, atomic IndexedDB updates |
 | Bounds | 2 MiB / 1,000 messages per selected file; 5,000 buffered records; 8 MiB decrypted vault; 100 permission records; 500 recent audit records; pending live queue capped at 1,000 events / 2 MiB of serialized event text |
-| Lifecycle | File mode locks on close/hide or five-minute inactivity; explicitly started live mode remains unlocked for at most one hour; expiry/revoke/disable/account change stop capture |
+| Lifecycle | Always-on resumes the accepted account after restart using Windows-protected credentials; Stop removes auto-start; optional timed sessions and file-mode idle locking remain |
 | Connector | Versioned encrypted handoff, reference decoder, per-event retry identifiers, recipient/scope/expiry checks; no network delivery |
 | Audit | Encrypted bounded permission/import/live-start/create/update/delete/export/revoke/prune records; counts and permission IDs, no message text |
 
