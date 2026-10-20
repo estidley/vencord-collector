@@ -63,4 +63,4 @@ npm run test:browser
 
 The lockfile pins dependencies. No Discord login, bot token, user token, or real messages are needed for tests. [Verification report](docs/VERIFICATION.md) distinguishes tests from live integration limitations.
 
-License: GPL-3.0-or-later. No remote repository or public deployment is created by this implementation.
+License: GPL-3.0-or-later. Publishing this source does not deploy a service or install the plugin.
