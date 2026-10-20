@@ -4,7 +4,7 @@ Reviewed on **2026-10-19**. These are implementation constraints drawn from prim
 
 ## Decision
 
-Two explicitly separated routes are implemented: a local-file importer and an unofficial passive Vencord live observer, added following the owner's explicit request. Live mode includes per-conversation start controls and an additional at-your-own-risk account-wide option. Neither mode is represented as Discord-approved. No message-history/store scanning, credential access, user-token session, Discord requests, automatic sending, or backfill is implemented. The risk checkbox acknowledges scope; it does not grant third-party consent or platform approval.
+Two explicitly separated routes are implemented: a local-file importer and an unofficial passive Vencord live observer, added following the owner's explicit request. Live mode includes per-conversation start controls and an additional at-your-own-risk account-wide option. Neither mode is represented as Discord-approved. User-reviewed snapshots of the currently selected channel cache are now supported. Scheduled-event cache snapshots and individually scoped presence/voice observations are separately opt-in. No automatic history/store traversal, credential access, user-token session, collector-initiated Discord requests, automatic sending, or backfill is implemented. The risk checkbox acknowledges scope; it does not grant third-party consent or platform approval.
 
 Technical access is broader than an official bot's access: Vencord runs inside the signed-in client and can receive DM events already delivered there. Passive observation does not require extracting the user token or creating a separate automated account connection. That technical distinction does not make the modified client compliant with Discord's Terms. See the [Vencord FAQ](https://vencord.dev/support/) and [inspected upstream implementation](VENCORD.md).
 
@@ -29,7 +29,7 @@ A bot does not provide access to arbitrary conversations between the user's pers
 
 ## Explicit gaps
 
-- No historical extraction, token access, collector-initiated Discord HTTP requests or separate Gateway connection. Live capture observes only events already delivered by the client; completeness is not guaranteed.
+- No automated historical extraction, token access, collector-initiated Discord HTTP requests or separate Gateway connection. Explicit cached selections can contain older messages, but do not establish a complete archive. Live capture observes only events already delivered by the client; completeness is not guaranteed.
 - No general sanctioned Vencord plugin route established by this research.
 - No bot deployment, intent approval, participant-consent service, or live permission synchronizer.
 - No automatic MCP upload, search agent, SQL server, or authenticated downstream revocation service.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import definePlugin from "@utils/types";
-import { ChannelStore, GuildStore, React, SelectedChannelStore, UserStore } from "@webpack/common";
+import { ChannelStore, GuildStore, GuildScheduledEventStore, MessageStore, PresenceStore, VoiceStateStore, React, SelectedChannelStore, UserStore } from "@webpack/common";
+import { ActivityCapture } from "../core/activity";
 import { Collector } from "../core/collector";
 import { channelProvenance, LiveCapture } from "../core/live";
 import { IndexedDbStorage } from "../core/storage";
@@ -14,6 +15,7 @@ collector.suspend();
 const live = new LiveCapture(collector, {
     accountId: () => UserStore?.getCurrentUser()?.id,
     selectedChannelId: () => SelectedChannelStore.getChannelId(),
+    loadedMessages: channelId => MessageStore.getMessages(channelId)?._array ?? [],
     provenance: channelId => {
         const accountId = UserStore.getCurrentUser()?.id;
         const channel = ChannelStore.getChannel(channelId);
@@ -23,6 +25,13 @@ const live = new LiveCapture(collector, {
     }
 });
 const currentAccount = () => UserStore?.getCurrentUser()?.id;
+const activity = new ActivityCapture(collector, live, {
+    accountId: currentAccount,
+    scheduledEvents: guildId => GuildScheduledEventStore?.getGuildScheduledEventsForGuild(guildId),
+    presence: userId => PresenceStore?.getState()?.statuses?.[userId],
+    voice: (guildId, userId) => VoiceStateStore?.getVoiceState(guildId, userId)?.channelId,
+    guildForChannel: channelId => ChannelStore?.getChannel(channelId)?.guild_id
+});
 const always = new AlwaysOn(collector, live, storage,
     () => typeof VencordNative !== "undefined" ? VencordNative.pluginHelpers?.MessageCollector as unknown as AutoProtection | undefined : undefined,
     currentAccount);
@@ -31,7 +40,7 @@ let observedAccount: string | undefined;
 function ready() {
     const account = currentAccount();
     if (observedAccount && account !== observedAccount) always.accountChanged();
-    observedAccount = account; live.checkAccount(); void always.restore();
+    observedAccount = account; live.checkAccount(); void always.restore(); activity.poll();
 }
 let Panel: ReturnType<typeof createPanel> | undefined;
 
@@ -41,14 +50,15 @@ function SettingsPanel() {
     return <Panel />;
 }
 
+// Stable plugin/native-helper identity preserves installed settings and automatic unlock.
 export default definePlugin({
     name: "MessageCollector",
-    description: "Opt-in live capture of selected conversations, file imports, and encrypted local buffering.",
+    description: "Vencord Collector: messages, loaded snapshots, scheduled events, and opt-in presence/voice observations.",
     authors: [], // Private plugin: no invented Discord author ID.
     enabledByDefault: false,
     settingsAboutComponent: SettingsPanel,
     start() {
-        collector.resume(); always.activate(); observedAccount = undefined; ready();
+        collector.resume(); activity.connection(true); always.activate(); observedAccount = undefined; ready();
         watcher = setInterval(ready, 1000); if (typeof watcher === "object") watcher.unref?.();
         globalThis.addEventListener?.("pagehide", stopSession);
     },
@@ -61,8 +71,12 @@ export default definePlugin({
         MESSAGE_UPDATE: payload => live.receive("MESSAGE_UPDATE", payload),
         MESSAGE_DELETE: payload => live.receive("MESSAGE_DELETE", payload),
         MESSAGE_DELETE_BULK: payload => live.receive("MESSAGE_DELETE_BULK", payload),
+        VOICE_STATE_UPDATES: payload => activity.voiceUpdates(payload),
         LOGOUT: () => { observedAccount = undefined; always.accountChanged(); },
-        CONNECTION_OPEN: ready,
+        CONNECTION_OPEN: () => { activity.connection(true); ready(); },
+        CONNECTION_RESUMED: () => { activity.connection(true); ready(); },
+        CONNECTION_INTERRUPTED: () => activity.connection(false),
+        CONNECTION_CLOSED: () => activity.connection(false),
         CURRENT_USER_UPDATE: ready
     }
 });

@@ -5,6 +5,7 @@ export interface LiveHost {
     accountId(): string | undefined;
     selectedChannelId(): string | undefined;
     provenance(channelId: string): Provenance | undefined;
+    loadedMessages?(channelId: string): readonly unknown[];
 }
 type EventName = "MESSAGE_CREATE" | "MESSAGE_UPDATE" | "MESSAGE_DELETE" | "MESSAGE_DELETE_BULK";
 const HOUR = 60 * 60_000;
@@ -114,6 +115,51 @@ export class LiveCapture {
         }, Math.max(0, end - this.clock()));
         // Timers must not keep test/CLI processes alive; browser timers are numeric.
         if (typeof this.timer === "object") this.timer.unref?.();
+    }
+    loadedPreview() {
+        this.checkAccount();
+        if (!this.active || !this.host.loadedMessages) throw new Error("Start capture inside Discord before reviewing loaded messages.");
+        const channelId = this.host.selectedChannelId();
+        const grant = [...this.grants.values()].find(g => g.scope === "account" || g.provenance?.channelId === channelId);
+        const provenance = channelId ? this.host.provenance(channelId) : undefined;
+        if (!channelId || !grant || !provenance || !permitsProvenance(grant, provenance)) throw new Error("This conversation is outside the active permission.");
+        const loaded = this.host.loadedMessages(channelId);
+        if (!Array.isArray(loaded) || loaded.length > 1000) throw new Error("The loaded selection exceeds the 1,000-message limit.");
+        const events: LiveObservation[] = [];
+        let bytes = 0;
+        for (const raw of loaded) {
+            const m = raw as Record<string, any>;
+            if (!m || m.deleted === true || m.channel_id !== channelId || !permitsSender(grant, m.author?.id) || m.state === "SENDING" || m.state === "SEND_FAILED" || (Number(m.flags) & 64) !== 0) continue;
+            const event = liveObservationSchema.safeParse({ type: "snapshot", messageId: m.id, channelId, senderId: m.author?.id,
+                createdAt: clientTime(m.timestamp), editedAt: clientTime(m.editedTimestamp ?? m.edited_timestamp ?? null), content: m.content });
+            if (!event.success) continue;
+            bytes += new TextEncoder().encode(JSON.stringify(event.data)).byteLength;
+            if (bytes > MAX_INPUT_BYTES) throw new Error("Loaded text exceeds the 2 MiB selection limit.");
+            events.push(event.data);
+        }
+        if (!events.length) throw new Error("No eligible loaded messages. Open a permitted conversation first.");
+        return { accountId: this.account!, grantId: grant.grantId, provenance: structuredClone(provenance), events, generation: this.generation };
+    }
+    async captureLoaded(preview: ReturnType<LiveCapture["loadedPreview"]>, confirmed: boolean) {
+        if (confirmed !== true) throw new Error("Review and confirm this loaded selection first.");
+        this.checkAccount();
+        if (!this.active || preview.generation !== this.generation || preview.accountId !== this.account ||
+            preview.provenance.channelId !== this.host.selectedChannelId() || !this.grants.has(preview.grantId)) throw new Error("Selection changed. Review loaded messages again.");
+        const observed = this.host.provenance(preview.provenance.channelId);
+        const grant = this.grants.get(preview.grantId)!;
+        if (!observed || !permitsProvenance(grant, observed) || JSON.stringify(observed) !== JSON.stringify(preview.provenance)) throw new Error("Conversation scope changed. Review again.");
+        // Queue reviewed snapshots with live events to preserve observed delete/edit ordering.
+        if (this.queue.length + preview.events.length > 1000) throw new Error("Capture queue is busy. Retry after it drains.");
+        const items = preview.events.map(raw => {
+            const event = parseSafe(liveObservationSchema, raw);
+            if (event.type !== "snapshot" || event.channelId !== observed.channelId) throw new Error("Invalid loaded selection.");
+            return { grantId: grant.grantId, event, generation: this.generation, bytes: new TextEncoder().encode(JSON.stringify(event)).byteLength, provenance: observed };
+        });
+        if (items.reduce((n, i) => n + i.bytes, this.queuedBytes) > MAX_INPUT_BYTES) throw new Error("Capture queue is full. Retry after it drains.");
+        this.queue.push(...items); this.queuedBytes += items.reduce((n, i) => n + i.bytes, 0);
+        void this.pump(); await this.drained();
+        if (!this.active) throw new Error("Capture stopped before the selection completed. Some snapshots may be missing.");
+        return items.length;
     }
     receive(name: EventName, payload: unknown) {
         this.checkAccount();

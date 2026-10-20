@@ -9,7 +9,7 @@ await build({ entryPoints: ["src/plugin/index.tsx"], outfile: "dist/messageColle
 await build({ entryPoints: ["src/plugin/native.ts"], outfile: "dist/messageCollector/native.ts", bundle: true, platform: "node", format: "esm", target: "es2022", external: ["electron"], banner: { js: "// SPDX-License-Identifier: GPL-3.0-or-later\n// @ts-nocheck" } });
 await copyFile("LICENSE", "dist/messageCollector/LICENSE");
 await copyFile("docs/VENCORD.md", "dist/messageCollector/README.md");
-for (const name of ["SECURITY.md", "POLICY.md", "IMPORTS.md", "CONNECTOR.md", "FLOW-REVIEW.md"]) {
+for (const name of ["SECURITY.md", "POLICY.md", "IMPORTS.md", "CONNECTOR.md", "FLOW-REVIEW.md", "DISCORD-DATA.md"]) {
     await copyFile(`docs/${name}`, `dist/messageCollector/${name}`);
 }
 await writeFile("dist/standalone/index.html", `<!doctype html>

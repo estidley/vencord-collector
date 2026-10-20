@@ -1,4 +1,4 @@
-# Vencord compatibility artifact
+# Vencord Collector compatibility artifact
 
 The generated `messageCollector` folder is a custom userplugin for opt-in live capture and file imports. It is disabled by default. The first setup requires a password and explicit acceptance; subsequently accepted always-on capture resumes automatically for the same account. Running a modified Discord client violates Discord's Terms of Service; this is an unofficial, at-your-own-risk route. The standalone app offers file imports without a client modification. This repository does not automatically install or inject Vencord.
 
@@ -8,7 +8,7 @@ Upstream: [Vendicated/Vencord](https://github.com/Vendicated/Vencord/tree/32c906
 
 - [`src/utils/types.ts`](https://github.com/Vendicated/Vencord/blob/32c90633ce6a95d7e56c95479efbb431bacf1eac/src/utils/types.ts): `definePlugin`, `enabledByDefault`, `settingsAboutComponent`, `start`, `stop`, and `flux`. The plugin manager subscribes/unsubscribes Flux handlers with plugin lifecycle.
 - [`xsOverlay`](https://github.com/Vendicated/Vencord/blob/32c90633ce6a95d7e56c95479efbb431bacf1eac/src/plugins/xsOverlay/index.tsx) demonstrates `MESSAGE_CREATE`, optimistic-event filtering, and DM/group-DM channel metadata. This collector also observes `MESSAGE_UPDATE`, `MESSAGE_DELETE`, and `MESSAGE_DELETE_BULK`. Pre-send/pre-edit callbacks are not confirmed events and are not used.
-- Cached `ChannelStore`, `GuildStore`, `SelectedChannelStore`, and `UserStore` supply provenance and the current account. No message store is enumerated, no history is requested, and no credential store is accessed.
+- Cached `ChannelStore`, `GuildStore`, `SelectedChannelStore`, and `UserStore` supply provenance and the current account. The selected channel's `MessageStore` cache is read only after an explicit review request. `GuildScheduledEventStore` and `PresenceStore` are sampled every five seconds for separately selected scopes; `VoiceStateStore` seeds known occupancy and `VOICE_STATE_UPDATES` supplies transitions. No history is requested and no credential store is accessed.
 - [`src/webpack/common/index.ts`](https://github.com/Vendicated/Vencord/blob/32c90633ce6a95d7e56c95479efbb431bacf1eac/src/webpack/common/index.ts): common exports include React. The plugin uses the host's React rather than bundling another renderer.
 - [Basic Plugin Setup](https://docs.vencord.dev/plugins/): custom plugins live in `src/userplugins/<camelCaseName>/index.ts(x)` and are built with Vencord; they are not independently installable extensions.
 - [Native code](https://docs.vencord.dev/plugins/native/): `native.ts` exposes only Windows credential protection/restore/availability through Electron safeStorage. It exposes no file paths, message access, or network bridge. Persistence remains in IndexedDB.
@@ -26,6 +26,8 @@ Run `npm ci && npm run build` in this repository. The output `dist/messageCollec
 3. Copy **the generated folder** `dist/messageCollector` into the Vencord checkout as `src/userplugins/messageCollector`. The entry must be `src/userplugins/messageCollector/index.tsx`, not an extra nested folder. This is not a loadable plugin for the stock prebuilt Vencord installer.
 4. In that Vencord checkout, run `pnpm build`, then its `pnpm inject` installer and choose your intended Discord installation. This modifies the installed client; the repository tests do not perform that step.
 5. Restart Discord. In Vencord's Plugins settings, enable **MessageCollector** and open its settings panel. Create/unlock a buffer with a unique passphrase.
+
+The product is now **Vencord Collector**. The plugin ID **MessageCollector**, helper ID, generated directory and database name remain unchanged to preserve installed settings and encrypted data. See [new collection controls](DISCORD-DATA.md).
 
 ## Choose a scope and start
 

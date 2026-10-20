@@ -22,6 +22,56 @@
         "account"
       ]
     },
+    "activity": {
+      "default": {
+        "scheduledEvents": false,
+        "presence": false,
+        "voice": false,
+        "guildIds": [],
+        "userIds": [],
+        "allowExport": false
+      },
+      "type": "object",
+      "properties": {
+        "scheduledEvents": {
+          "type": "boolean"
+        },
+        "presence": {
+          "type": "boolean"
+        },
+        "voice": {
+          "type": "boolean"
+        },
+        "guildIds": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "userIds": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "allowExport": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scheduledEvents",
+        "presence",
+        "voice",
+        "guildIds",
+        "userIds",
+        "allowExport"
+      ],
+      "additionalProperties": false
+    },
     "provenance": {
       "anyOf": [
         {
@@ -168,6 +218,7 @@
     "source",
     "accountId",
     "scope",
+    "activity",
     "provenance",
     "allowedSenderIds",
     "purpose",

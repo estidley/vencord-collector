@@ -3,6 +3,7 @@ import { Collector } from "../core/collector";
 import type { LiveCapture } from "../core/live";
 import type { AlwaysOn } from "../core/always-on";
 import { grantExpiry, MAX_INPUT_BYTES, parseJson } from "../core/schema";
+import { createCaptureExtras } from "./CaptureExtras";
 
 export function exampleGrant() {
     return {
@@ -18,6 +19,7 @@ export function exampleGrant() {
 
 // React is supplied by the host. The Vencord bundle uses Discord's React; the offline app uses its own.
 export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "useState" | "useRef" | "useEffect">, collector: Collector, live?: LiveCapture, always?: AlwaysOn) {
+    const Extras = live ? createCaptureExtras(React, collector, live) : undefined;
     return function Panel() {
         const [status, setStatus] = React.useState(collector.status());
         const [liveStatus, setLiveStatus] = React.useState(live?.status());
@@ -82,7 +84,7 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
         const field: ReactTypes.CSSProperties = { display: "block", margin: "12px 0" };
         const control: ReactTypes.CSSProperties = { width: "100%", boxSizing: "border-box", padding: 8, color: "#18212c", background: "#fff", border: "1px solid #8b97a5", borderRadius: 4 };
         return <section style={{ background: "#f5f7fa", color: "#18212c", padding: 20, borderRadius: 8, fontFamily: "system-ui", lineHeight: 1.5 }} onInput={touch} onClick={touch}>
-            <h2>Conversation collector</h2>
+            <h2>Vencord Collector</h2>
             <p>{always ? "Enter your password once and accept to collect automatically whenever Discord is open." : live ? "Choose file imports or explicitly start live capture for selected conversations. No history fetching." : "Import files you choose into an encrypted local buffer. For live capture, install the Vencord plugin and open its settings inside Discord. This browser app cannot see Discord messages."}</p>
             {live && <p>Vencord is an unofficial client modification and violates Discord's Terms of Service. Participant permission does not provide platform approval.</p>}
             {liveStatus && <p aria-live="polite">{liveStatus.active ? `Live: ${liveStatus.allConversations ? "ALL conversations on this account" : `${liveStatus.grantIds.length} conversation(s)`}, ${liveStatus.saved} changes saved. ${liveStatus.continuous ? "Continuous — no session time limit." : `Ends ${new Date(liveStatus.endsAt!).toLocaleTimeString()}.`}` : liveStatus.notice}</p>}
@@ -112,6 +114,7 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
             </form> : <>
                 <p><strong>{status.count} records buffered</strong> · {liveStatus?.active ? "Live capture keeps the buffer unlocked while this panel is closed or hidden, until the session ends." : "Locks after five minutes without interaction, when hidden, or when this panel closes."}</p>
                 {always && !liveStatus?.active && <button onClick={() => collector.lock()}>Return to automatic collection setup</button>}
+                {Extras && <Extras status={status} />}
                 <details open={always ? undefined : true}><summary>Advanced: file imports, permissions and export</summary>
                 <button onClick={() => { if (always) void run(async () => { await always.disable(); return "Locked; automatic collection disabled."; }); else collector.lock(); }}>Lock now</button>{" "}
                 <button disabled={busy} onClick={() => void run(async () => { await collector.prune(); return "Expired snapshots removed."; })}>Remove expired snapshots</button>

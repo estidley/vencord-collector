@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { activityEventSchema, activityPermissionSchema, noActivity } from "./activity-schema";
 
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024;
 export const MAX_VAULT_BYTES = 8 * 1024 * 1024;
@@ -34,6 +35,7 @@ export const manualInputSchema = z.strictObject({
 
 export const grantDraftSchema = z.strictObject({
     source, accountId: id, scope: z.enum(["conversation", "account"]).default("conversation"),
+    activity: activityPermissionSchema.default(noActivity),
     provenance: provenanceSchema.nullable(),
     allowedSenderIds: z.array(id).max(100),
     purpose: z.string().trim().min(5).max(300),
@@ -42,6 +44,8 @@ export const grantDraftSchema = z.strictObject({
     allowExport: z.boolean(),
     principalId: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/)
 }).superRefine((g, c) => {
+    if ((g.activity.scheduledEvents || g.activity.presence || g.activity.voice) && (g.source !== "vencord-live" || g.scope !== "account"))
+        c.addIssue({ code: "custom", message: "Activity requires an account-wide live permission." });
     if (g.continuous ? g.source !== "vencord-live" || g.expiresAt !== null : g.expiresAt === null)
         c.addIssue({ code: "custom", message: "Only continuous live permissions may have no expiry." });
     if (g.scope === "account" && (g.source !== "vencord-live" || g.provenance !== null || g.allowedSenderIds.length !== 0))
@@ -89,12 +93,13 @@ export type MessageEvent = z.infer<typeof eventSchema>;
 
 export const auditSchema = z.strictObject({
     auditId: z.uuid(), at: instant,
-    action: z.enum(["grant", "import", "export", "revoke", "prune", "capacity-prune", "live-start", "live-create", "live-update", "live-delete"]),
+    action: z.enum(["grant", "import", "export", "revoke", "prune", "capacity-prune", "live-start", "live-create", "live-update", "live-delete", "loaded-snapshot", "activity-permission", "activity-save", "activity-export"]),
     grantId: z.uuid().nullable(), count: z.number().int().nonnegative()
 });
 export const stateSchema = z.strictObject({
     version: z.literal(1), grants: z.array(grantSchema).max(100),
     records: z.array(z.strictObject({ digest: z.string().regex(/^[a-f0-9]{64}$/), event: eventSchema })).max(5000),
+    activities: z.array(activityEventSchema).max(2000).default([]),
     audit: z.array(auditSchema).max(500)
 });
 export type State = z.infer<typeof stateSchema>;
@@ -105,8 +110,16 @@ export const batchSchema = z.strictObject({
     grant: grantSchema, events: z.array(eventSchema).min(1).max(5000)
 });
 export type Batch = z.infer<typeof batchSchema>;
+export const activityBatchSchema = z.strictObject({
+    protocol: z.literal("personal-coordination/activity-file"), version: z.literal(1),
+    batchId: z.uuid(), createdAt: instant, expiresAt: instant,
+    audience: z.literal("personal-coordination-mcp"), principalId: z.string().min(1).max(100),
+    grant: grantSchema, events: z.array(activityEventSchema).min(1).max(2000)
+});
 
 export const liveObservationSchema = z.discriminatedUnion("type", [
+    z.strictObject({ type: z.literal("snapshot"), messageId: id, channelId: id, senderId: id,
+        createdAt: instant, editedAt: instant.nullable(), content: z.string().max(20_000) }),
     z.strictObject({ type: z.literal("create"), messageId: id, channelId: id, senderId: id,
         createdAt: instant, content: z.string().max(20_000) }),
     z.strictObject({ type: z.literal("update"), messageId: id, channelId: id, senderId: id.optional(),

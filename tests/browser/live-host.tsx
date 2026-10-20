@@ -8,12 +8,19 @@ import { createPanel } from "../../src/ui/Panel";
 import { AlwaysOn } from "../../src/core/always-on";
 import { autoConfigSchema } from "../../src/core/auto-config";
 import { derive, seal, open } from "../../src/core/crypto";
+import { ActivityCapture } from "../../src/core/activity";
 let account = "100000000000000001"; const channel = "200000000000000001";
 const storage = new IndexedDbStorage(); const collector = new Collector(storage);
 const live = new LiveCapture(collector, {
     accountId: () => account, selectedChannelId: () => channel,
+    loadedMessages: () => [{ id: "300000000000000003", channel_id: channel, author: { id: account }, timestamp: new Date().toISOString(), content: "synthetic cached text" }],
     provenance: () => ({ kind: "dm", guildId: null, guildName: null, channelId: channel,
         channelName: null, parentChannelId: null, threadId: null, participantIds: [account] })
+});
+const activity = new ActivityCapture(collector, live, {
+    accountId: () => account,
+    scheduledEvents: guildId => [{ id: "400", guild_id: guildId, name: "Synthetic game night", scheduled_start_time: "2026-12-01T19:00:00Z", status: 1 }],
+    presence: () => "online", voice: () => undefined
 });
 // Fake OS protection for synthetic browser tests only. Production uses Windows DPAPI.
 const testKeyPassword = "synthetic operating system fixture key";
@@ -37,7 +44,8 @@ const fixture = {
     },
     status: () => ({ ...live.status(), count: collector.status().count, unlocked: collector.unlocked }),
     switchAccount: async (value: string) => { account = value; always?.accountChanged(); await always?.restore(); },
-    storedAuto: () => storage.readAuto()
+    storedAuto: () => storage.readAuto(),
+    activity: async () => { activity.poll(); await activity.drained(); return collector.status().activityCount; }
 };
 (window as any).__liveFixture = fixture;
 fixture.mount(true);

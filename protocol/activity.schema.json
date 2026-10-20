@@ -1,0 +1,452 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "grantId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "accountId": {
+      "type": "string",
+      "pattern": "^[0-9]{1,20}$"
+    },
+    "source": {
+      "type": "string",
+      "const": "vencord-live"
+    },
+    "provenanceEvidence": {
+      "type": "string",
+      "const": "client-observed"
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "observation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "scheduled-event.snapshot"
+            },
+            "guildId": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            },
+            "scheduledEventId": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            },
+            "channelId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{1,20}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "creatorId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{1,20}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "startsAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "endsAt": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "scheduled",
+                "active",
+                "completed",
+                "cancelled"
+              ]
+            },
+            "location": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 1000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recurrence": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "end": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "frequency": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 3
+                    },
+                    "interval": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "byWeekday": {
+                      "anyOf": [
+                        {
+                          "maxItems": 7,
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 6
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "byNWeekday": {
+                      "anyOf": [
+                        {
+                          "maxItems": 35,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "n": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "day": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 6
+                              }
+                            },
+                            "required": [
+                              "n",
+                              "day"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "byMonth": {
+                      "anyOf": [
+                        {
+                          "maxItems": 12,
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 12
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "byMonthDay": {
+                      "anyOf": [
+                        {
+                          "maxItems": 31,
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "byYearDay": {
+                      "anyOf": [
+                        {
+                          "maxItems": 366,
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "count": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "end",
+                    "frequency",
+                    "interval",
+                    "byWeekday",
+                    "byNWeekday",
+                    "byMonth",
+                    "byMonthDay",
+                    "byYearDay",
+                    "count"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "recurrenceExceptionsUnresolved": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "guildId",
+            "scheduledEventId",
+            "channelId",
+            "creatorId",
+            "name",
+            "description",
+            "startsAt",
+            "endsAt",
+            "status",
+            "location",
+            "recurrence",
+            "recurrenceExceptionsUnresolved"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "presence.observed"
+            },
+            "userId": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "online",
+                "idle",
+                "dnd",
+                "offline"
+              ]
+            },
+            "previousStatus": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "online",
+                    "idle",
+                    "dnd",
+                    "offline"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "userId",
+            "status",
+            "previousStatus"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "voice.observed"
+            },
+            "guildId": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            },
+            "userId": {
+              "type": "string",
+              "pattern": "^[0-9]{1,20}$"
+            },
+            "channelId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{1,20}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "previousChannelId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{1,20}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observation": {
+              "type": "string",
+              "enum": [
+                "baseline",
+                "transition"
+              ]
+            },
+            "previousChannelObservedSince": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observedDurationSeconds": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "guildId",
+            "userId",
+            "channelId",
+            "previousChannelId",
+            "observation",
+            "previousChannelObservedSince",
+            "observedDurationSeconds"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "version",
+    "eventId",
+    "grantId",
+    "accountId",
+    "source",
+    "provenanceEvidence",
+    "observedAt",
+    "expiresAt",
+    "observation"
+  ],
+  "additionalProperties": false
+}

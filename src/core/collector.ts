@@ -1,10 +1,11 @@
 import { derive, digest, envelopeSchema, open, seal, type Envelope, type Secret } from "./crypto";
 import { parseImport } from "./importer";
-import { batchSchema, grantDraftSchema, grantExpiry, liveObservationSchema, MAX_VAULT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
+import { activityBatchSchema, batchSchema, grantDraftSchema, grantExpiry, liveObservationSchema, MAX_VAULT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
+import { activityObservationSchema, activityPermissionSchema, permitsActivity, type ActivityEvent } from "./activity-schema";
 import type { VaultStorage } from "./storage";
 
 const DAY = 86_400_000;
-const fresh = (): State => ({ version: 1, grants: [], records: [], audit: [] });
+const fresh = (): State => ({ version: 1, grants: [], records: [], activities: [], audit: [] });
 const uid = () => crypto.randomUUID();
 
 export class Collector {
@@ -56,10 +57,11 @@ export class Collector {
         state.audit = state.audit.slice(-500);
     }
     private pruneState(state: State) {
-        const before = state.records.length;
+        const before = state.records.length + state.activities.length;
         const activeIds = new Set(state.grants.filter(g => !g.revokedAt && grantExpiry(g) > this.clock()).map(g => g.grantId));
         state.records = state.records.filter(r => Date.parse(r.event.expiresAt) > this.clock() && activeIds.has(r.event.grantId));
-        const count = before - state.records.length;
+        state.activities = state.activities.filter(e => Date.parse(e.expiresAt) > this.clock() && activeIds.has(e.grantId));
+        const count = before - state.records.length - state.activities.length;
         if (count) this.audit(state, "prune", null, count);
         return count;
     }
@@ -90,10 +92,10 @@ export class Collector {
         return grant;
     }
     status() {
-        if (!this.state) return { unlocked: false, count: 0, grants: [] as Grant[], audit: [] as State["audit"] };
+        if (!this.state) return { unlocked: false, count: 0, activityCount: 0, grants: [] as Grant[], audit: [] as State["audit"] };
         const state = structuredClone(this.state);
         this.pruneState(state);
-        return { unlocked: true, count: state.records.length, grants: state.grants, audit: state.audit };
+        return { unlocked: true, count: state.records.length, activityCount: state.activities.length, grants: state.grants, audit: state.audit };
     }
     async grant(input: unknown, attested: boolean): Promise<Grant> {
         if (attested !== true) throw new Error("Confirm your authority and permission for this specific conversation first.");
@@ -148,8 +150,9 @@ export class Collector {
             const grant = state.grants.find(g => g.grantId === grantId);
             if (!grant) throw new Error("Permission not found.");
             grant.revokedAt = this.now(); grant.allowExport = false;
-            const count = state.records.filter(r => r.event.grantId === grantId).length;
+            const count = state.records.filter(r => r.event.grantId === grantId).length + state.activities.filter(e => e.grantId === grantId).length;
             state.records = state.records.filter(r => r.event.grantId !== grantId);
+            state.activities = state.activities.filter(e => e.grantId !== grantId);
             this.audit(state, "revoke", grantId, count);
             return count;
         });
@@ -178,11 +181,11 @@ export class Collector {
                 (input.type === "delete" ? state.records.find(r => sameMessage(r.event))?.event : undefined);
             // Never resurrect deleted content, fetch missing messages, or invent an original sender.
             if (state.records.some(r => sameMessage(r.event) && r.event.type === "message.delete")) return false;
-            if (input.type !== "create" && !previous) return false;
+            if (input.type !== "create" && input.type !== "snapshot" && !previous) return false;
             const provenance = suppliedProvenance ?? (input.type === "delete" ? previous?.provenance : undefined) ?? grant.provenance;
             if (!provenance || provenance.channelId !== input.channelId || !permitsProvenance(grant, provenance))
                 throw new Error("Client provenance is outside its live permission.");
-            const senderId = input.type === "create" ? input.senderId : previous?.senderId;
+            const senderId = input.type === "create" || input.type === "snapshot" ? input.senderId : previous?.senderId;
             if (!senderId || !permitsSender(grant, senderId)) return false;
             if (input.type === "update" && input.senderId && input.senderId !== senderId) throw new Error("Client event sender changed unexpectedly.");
             const base = { version: 1 as const, eventId: crypto.randomUUID(), messageId: input.messageId,
@@ -191,7 +194,10 @@ export class Collector {
                 expiresAt: new Date(Math.min(previous ? Date.parse(previous.expiresAt) : Infinity,
                     grantExpiry(grant), this.clock() + grant.retentionDays * DAY)).toISOString() };
             let event: MessageEvent;
-            if (input.type === "create") {
+            if (input.type === "snapshot") {
+                if (previous) return false; // A stale cache must not overwrite newer live content.
+                event = { ...base, type: "message.snapshot", sourceTimestamp: input.createdAt, createdAt: input.createdAt, editedAt: input.editedAt, content: input.content };
+            } else if (input.type === "create") {
                 if (previous) return false;
                 event = { ...base, type: "message.create", sourceTimestamp: input.createdAt, createdAt: input.createdAt, content: input.content };
             } else if (input.type === "update") {
@@ -211,7 +217,7 @@ export class Collector {
             state.records = state.records.filter(r => !(sameMessage(r.event) && (input.type === "delete" || r.event.source === "vencord-live")));
             state.records.push({ digest: await digest(event), event });
             this.active(state, grantId);
-            this.audit(state, `live-${input.type}`, grantId, 1);
+            this.audit(state, input.type === "snapshot" ? "loaded-snapshot" : `live-${input.type}`, grantId, 1);
             if (grant.continuous) {
                 // Only the explicitly continuous permission's oldest records roll out. Imports stay intact.
                 let count = 0;
@@ -224,6 +230,63 @@ export class Collector {
             }
             if (state.records.length > 5000) throw new Error("Buffer capacity reached. Live capture must stop.");
             return true;
+        });
+    }
+    async configureActivity(grantId: string, input: unknown, confirmed: boolean) {
+        if (confirmed !== true) throw new Error("Confirm authority for the selected servers and people first.");
+        const permission = parseSafe(activityPermissionSchema, input);
+        return this.mutate(state => {
+            const grant = this.active(state, grantId);
+            if (grant.source !== "vencord-live" || grant.scope !== "account") throw new Error("Start account-wide collection first.");
+            grant.activity = permission;
+            // Scope reductions erase observations no longer permitted.
+            state.activities = state.activities.filter(e => e.grantId !== grantId || permitsActivity(permission, e.observation));
+            this.audit(state, "activity-permission", grantId, 0);
+        });
+    }
+    async captureActivity(grantId: string, accountId: string, raw: unknown) {
+        const observation = parseSafe(activityObservationSchema, raw);
+        return this.mutate(state => {
+            const grant = this.active(state, grantId);
+            if (grant.source !== "vencord-live" || grant.scope !== "account" || grant.accountId !== accountId || !permitsActivity(grant.activity, observation))
+                throw new Error("Activity is outside its permission.");
+            // Schedule snapshots represent latest cached state, not a fabricated create/update/delete history.
+            if (observation.type === "scheduled-event.snapshot") {
+                const same = (e: ActivityEvent) => e.grantId === grantId && e.observation.type === "scheduled-event.snapshot" && e.observation.guildId === observation.guildId && e.observation.scheduledEventId === observation.scheduledEventId;
+                const previous = state.activities.find(same);
+                if (previous && JSON.stringify(previous.observation) === JSON.stringify(observation)) return false;
+                state.activities = state.activities.filter(e => !same(e));
+            }
+            const event: ActivityEvent = { version: 1, eventId: uid(), grantId, accountId,
+                source: "vencord-live", provenanceEvidence: "client-observed", observedAt: this.now(),
+                expiresAt: new Date(Math.min(grantExpiry(grant), this.clock() + grant.retentionDays * DAY)).toISOString(), observation };
+            state.activities.push(event);
+            this.audit(state, "activity-save", grantId, 1);
+            let removed = 0;
+            while (state.activities.length > 2000 || new TextEncoder().encode(JSON.stringify(state)).byteLength > MAX_VAULT_BYTES - 1024) {
+                const index = state.activities.findIndex(e => e.grantId === grantId && e.eventId !== event.eventId);
+                if (index < 0) throw new Error("Buffer is full. Free space before collecting activity.");
+                state.activities.splice(index, 1); removed++;
+            }
+            if (removed) this.audit(state, "capacity-prune", grantId, removed);
+            return true;
+        });
+    }
+    async exportActivity(grantId: string, passphrase: string, confirmed: boolean): Promise<Envelope> {
+        if (confirmed !== true) throw new Error("Confirm the activity handoff first.");
+        return this.mutate(async state => {
+            const grant = this.active(state, grantId);
+            if (!grant.activity.allowExport) throw new Error("Activity export is disabled.");
+            const events = state.activities.filter(e => e.grantId === grantId && permitsActivity(grant.activity, e.observation));
+            if (!events.length) throw new Error("No eligible activities to export.");
+            const batch = parseSafe(activityBatchSchema, { protocol: "personal-coordination/activity-file", version: 1,
+                batchId: uid(), createdAt: this.now(), expiresAt: new Date(Math.min(...events.map(e => Date.parse(e.expiresAt)))).toISOString(),
+                audience: "personal-coordination-mcp", principalId: grant.principalId, grant, events });
+            const encrypted = await seal(batch, await derive(passphrase), "coordination-batch/v1");
+            this.active(state, grantId);
+            if (Date.parse(batch.expiresAt) <= this.clock()) throw new Error("Export expired. Retry after pruning.");
+            this.audit(state, "activity-export", grantId, events.length);
+            return encrypted;
         });
     }
     async verifyPassphrase(passphrase: string): Promise<void> {

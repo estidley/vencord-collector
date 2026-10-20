@@ -13,7 +13,7 @@ test("plugin loads before host stores resolve, defaults off, and observes only e
         plugins: [{ name: "mock-host", setup(b) {
             b.onResolve({ filter: /^@(webpack\/common|utils\/types)$/ }, args => ({ path: args.path, namespace: "mock" }));
             b.onLoad({ filter: /.*/, namespace: "mock" }, args => ({
-                contents: args.path === "@utils/types" ? "export default p => p;" : 'import * as R from "react"; export let React, ChannelStore, GuildStore, SelectedChannelStore, UserStore; export function init() { React = R; }',
+                contents: args.path === "@utils/types" ? "export default p => p;" : 'import * as R from "react"; export let React, ChannelStore, GuildStore, SelectedChannelStore, UserStore, GuildScheduledEventStore, MessageStore, PresenceStore, VoiceStateStore; export function init() { React = R; }',
                 resolveDir: resolve(".")
             }));
         } }]
@@ -23,7 +23,7 @@ test("plugin loads before host stores resolve, defaults off, and observes only e
     const { plugin, init } = mod.exports;
     assert.equal(plugin.enabledByDefault, false);
     for (const key of ["patches", "contextMenus", "onMessageClick", "onBeforeMessageSend", "onBeforeMessageEdit"]) assert.equal(plugin[key], undefined);
-    assert.deepEqual(Object.keys(plugin.flux).sort(), ["MESSAGE_CREATE", "MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_DELETE_BULK", "LOGOUT", "CONNECTION_OPEN", "CURRENT_USER_UPDATE"].sort());
+    assert.deepEqual(Object.keys(plugin.flux).sort(), ["MESSAGE_CREATE", "MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_DELETE_BULK", "VOICE_STATE_UPDATES", "LOGOUT", "CONNECTION_OPEN", "CONNECTION_CLOSED", "CONNECTION_INTERRUPTED", "CONNECTION_RESUMED", "CURRENT_USER_UPDATE"].sort());
     // Disabled/unstarted event handlers must not even access unresolved host stores.
     for (const handler of Object.values(plugin.flux) as Function[]) handler({});
     init();

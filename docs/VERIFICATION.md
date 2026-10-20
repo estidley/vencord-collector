@@ -1,21 +1,25 @@
 # Verification report
 
-Live-plus-import implementation verified 2026-10-19 in the separate `vencord-message-collector` Git repository. Pulse code was not opened for editing, imported, or changed. Verification used synthetic messages and a synthetic browser host, with no Discord session or client injection.
+Live-plus-import implementation verified 2026-10-19 in the separate `vencord-collector` Git repository. Pulse code was not opened for editing, imported, or changed. Verification used synthetic messages and a synthetic browser host, with no Discord session or client injection.
 
 ## Results
 
 | Check | Result |
 |---|---|
 | `npm run typecheck` | Passed: strict shared core/UI/standalone/test checks |
-| `npm test` | **49 passed, 0 failed** |
-| `npm run schema` | Generated five versioned JSON Schema files |
+| `npm test` | **57 passed, 0 failed** |
+| `npm run schema` | Generated seven versioned JSON Schema files |
 | `npm run build` | Passed: standalone web app and bundled private Vencord userplugin |
-| `npm run test:browser` | **8 passed, 0 failed**, real headless Chromium; file, timed-live and simplified always-on flows |
+| `npm run test:browser` | **9 passed, 0 failed**, real headless Chromium; file, timed-live and simplified always-on flows |
 | `npm run check:vencord -- <checkout>` | Passed: original plugin source checked against actual Vencord aliases/types |
 | Vencord `pnpm build --standalone` with generated plugin present | Passed: desktop/main/preload/renderer artifacts |
 | Vencord `pnpm testTsc` with generated plugin present | Passed |
 
 Environment: Windows, Node.js 25.6.1, npm 11.9.0, Playwright 1.64.1 / Chromium 156.0.8078.4. Vencord reference commit: `32c90633ce6a95d7e56c95479efbb431bacf1eac`; dependencies installed from its frozen lockfile. The package declares Node 22+, but Node 22 itself was not exercised locally. A GitHub Actions workflow for Node 22 is included; the results above describe local checks. Browser tests use isolated ports 4318/4319 so they do not stop the owner's app on 4317.
+
+## Added coverage
+
+Loaded snapshots: explicit confirmation, current-channel binding, text/record bounds, exclusions, duplicate replay and retained deletions. Activity: opt-in migration from old vaults, no reads before consent, scope checks and reductions, presence baselines and unknown status, voice intervals and reconnect gaps, encrypted handoff validation, revocation, account switching and storage failure. A browser flow exercises loaded review/confirm, activity setup, restart persistence and erasure. No real Discord data was accessed.
 
 ## Coverage
 
@@ -43,11 +47,11 @@ The browser fixture is compiled only by a test server. It is absent from both pr
 ## Not verified / remaining blockers
 
 1. No logged-in Discord runtime test or Vencord injection was performed. Upstream build/source compatibility (including native helper) is verified, not platform approval, real OS-protection behavior in Discord, or future client compatibility. The native helper requires a full Discord restart after rebuilding.
-2. Live capture is implemented but unofficial, not platform-approved, and not a completeness guarantee. It is bounded to explicit sessions and events delivered to the client. No history, offline backfill, token access, attachments, voice recording, bot deployment, or independent consent service is implemented. High-volume account-wide capture can exhaust its queue/vault and stop.
+2. Live capture is implemented but unofficial, not platform-approved, and not a completeness guarantee. It is bounded to explicit sessions and events delivered to the client. Explicit loaded-cache snapshots are implemented; automatic history traversal, offline backfill, token access, attachments, voice recording, bot deployment and an independent consent service are not. Scheduled-event caches and voice payloads may change; disappearance is not treated as cancellation. Presence polling can miss short transitions; exact logins and server viewing are unavailable. High-volume account-wide capture can exhaust its queue/vault and stop.
 3. Official export import was tested with synthetic documented-format fixtures, not the user's real package. Legacy CSV, changed layouts and numeric IDs need a lossless offline conversion adapter.
 4. `personal-coordination-mcp` is not implemented here. The file protocol and decoder are ready for integration, but authenticated receiver ACLs, SQL/search, durable agent-access auditing and downstream revocation are not provided.
 5. Encryption is browser-profile storage protection, not renderer isolation or verifiable secure deletion. Audit history is bounded, owner-controlled and not tamper-evident. See `SECURITY.md` for exact retention and trust boundaries.
 
 ## Concrete implementation
 
-The repository contains source code, lockfile, license, synthetic example, five protocol schemas, CI configuration, core/browser tests and documentation. Generated plugin output is under `dist/messageCollector`; standalone output is under `dist/standalone`. Generated files and installed dependencies are excluded from Git and can be reproduced with `npm ci && npm run build`.
+The repository contains source code, lockfile, license, synthetic example, seven protocol schemas, CI configuration, core/browser tests and documentation. Generated plugin output is under `dist/messageCollector`; standalone output is under `dist/standalone`. Generated files and installed dependencies are excluded from Git and can be reproduced with `npm ci && npm run build`.
