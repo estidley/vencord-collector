@@ -1,6 +1,6 @@
 import { derive, digest, envelopeSchema, open, seal, type Envelope, type Secret } from "./crypto";
 import { parseImport } from "./importer";
-import { batchSchema, grantDraftSchema, parseSafe, stateSchema, type Grant, type MessageEvent, type State } from "./schema";
+import { batchSchema, grantDraftSchema, liveObservationSchema, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
 import type { VaultStorage } from "./storage";
 
 const DAY = 86_400_000;
@@ -12,7 +12,7 @@ export class Collector {
     private state?: State;
     private revision = 0;
     private epoch = 0;
-    private busy = false;
+    private pending: Promise<unknown> = Promise.resolve();
     private listeners = new Set<() => void>();
     private enabled = true;
     constructor(private storage: VaultStorage, private clock = () => Date.now()) {}
@@ -25,18 +25,19 @@ export class Collector {
     lock() { this.epoch++; this.secret = undefined; this.state = undefined; this.notify(); }
     private now() { return new Date(this.clock()).toISOString(); }
     private async exclusive<T>(fn: () => Promise<T>): Promise<T> {
-        if (this.busy) throw new Error("Another operation is running. Please retry after it finishes.");
-        this.busy = true;
-        try { return await fn(); } finally { this.busy = false; }
+        const task = this.pending.then(fn);
+        this.pending = task.catch(() => {});
+        return task;
     }
     private check(epoch: number) {
         if (epoch !== this.epoch || !this.unlocked) throw new Error("Buffer locked. Unlock and retry.");
     }
     async unlock(passphrase: string): Promise<void> {
+        this.lock();
+        const epoch = this.epoch;
         return this.exclusive(async () => {
             if (!this.enabled) throw new Error("Enable the plugin first.");
-            this.lock();
-            const epoch = this.epoch;
+            if (epoch !== this.epoch) throw new Error("Unlock cancelled.");
             const stored = await this.storage.read();
             const envelope = stored ? parseSafe(envelopeSchema, stored.envelope) : undefined;
             const secret = await derive(passphrase, envelope?.salt);
@@ -73,8 +74,8 @@ export class Collector {
         this.notify();
     }
     private async mutate<T>(fn: (state: State, epoch: number) => Promise<T> | T): Promise<T> {
+        const epoch = this.epoch;
         return this.exclusive(async () => {
-            const epoch = this.epoch;
             this.check(epoch);
             const state = structuredClone(this.state!);
             this.pruneState(state);
@@ -124,6 +125,9 @@ export class Collector {
             const known = new Set(state.records.map(r => r.digest));
             let count = 0;
             for (const m of input.messages) {
+                // A still-retained observed deletion also prevents reimporting an older file copy.
+                if (state.records.some(r => r.event.type === "message.delete" && r.event.accountId === input.accountId &&
+                    r.event.provenance.channelId === input.provenance.channelId && r.event.messageId === m.messageId)) continue;
                 const hash = await digest({ grantId, source: grant.source, accountId: input.accountId, provenance: input.provenance, ...m });
                 if (known.has(hash)) continue;
                 const event: MessageEvent = { version: 1, type: "message.snapshot", eventId: uid(), grantId,
@@ -151,6 +155,67 @@ export class Collector {
         });
     }
     async prune(): Promise<void> { await this.mutate(() => {}); }
+    async beginLive(grantId: string, accountId: string, observed?: Provenance): Promise<Grant> {
+        return this.mutate(state => {
+            const grant = this.active(state, grantId);
+            if (grant.source !== "vencord-live" || grant.accountId !== accountId ||
+                (grant.scope !== "account" && (!observed || !permitsProvenance(grant, observed))))
+                throw new Error("The live permission does not match this account and conversation.");
+            this.audit(state, "live-start", grantId, 0);
+            return structuredClone(grant);
+        });
+    }
+    async captureLive(grantId: string, accountId: string, observation: unknown, observed?: Provenance): Promise<boolean> {
+        const input = parseSafe(liveObservationSchema, observation);
+        const suppliedProvenance = observed ? parseSafe(provenanceSchema, observed) : undefined;
+        return this.mutate(async state => {
+            const grant = this.active(state, grantId);
+            if (grant.source !== "vencord-live" || grant.accountId !== accountId ||
+                (grant.scope !== "account" && grant.provenance?.channelId !== input.channelId))
+                throw new Error("Client event is outside its live permission.");
+            const sameMessage = (e: MessageEvent) => e.accountId === accountId && e.provenance.channelId === input.channelId && e.messageId === input.messageId;
+            const previous = state.records.find(r => r.event.grantId === grantId && sameMessage(r.event))?.event ??
+                (input.type === "delete" ? state.records.find(r => sameMessage(r.event))?.event : undefined);
+            // Never resurrect deleted content, fetch missing messages, or invent an original sender.
+            if (state.records.some(r => sameMessage(r.event) && r.event.type === "message.delete")) return false;
+            if (input.type !== "create" && !previous) return false;
+            const provenance = suppliedProvenance ?? (input.type === "delete" ? previous?.provenance : undefined) ?? grant.provenance;
+            if (!provenance || provenance.channelId !== input.channelId || !permitsProvenance(grant, provenance))
+                throw new Error("Client provenance is outside its live permission.");
+            const senderId = input.type === "create" ? input.senderId : previous?.senderId;
+            if (!senderId || !permitsSender(grant, senderId)) return false;
+            if (input.type === "update" && input.senderId && input.senderId !== senderId) throw new Error("Client event sender changed unexpectedly.");
+            const base = { version: 1 as const, eventId: crypto.randomUUID(), messageId: input.messageId,
+                source: "vencord-live" as const, accountId, provenance,
+                provenanceEvidence: "client-observed" as const, grantId, observedAt: this.now(), senderId,
+                expiresAt: new Date(Math.min(previous ? Date.parse(previous.expiresAt) : Infinity,
+                    Date.parse(grant.expiresAt), this.clock() + grant.retentionDays * DAY)).toISOString() };
+            let event: MessageEvent;
+            if (input.type === "create") {
+                if (previous) return false;
+                event = { ...base, type: "message.create", sourceTimestamp: input.createdAt, createdAt: input.createdAt, content: input.content };
+            } else if (input.type === "update") {
+                if (input.content === undefined && input.editedAt === undefined) return false;
+                const oldContent = previous!.type === "message.update" ? previous!.patch.content : "content" in previous! ? previous!.content : undefined;
+                const oldEdited = previous!.type === "message.update" ? previous!.patch.editedAt : undefined;
+                if ((input.content === undefined || input.content === oldContent) && (input.editedAt === undefined || input.editedAt === oldEdited)) return false;
+                event = { ...base, type: "message.update", sourceTimestamp: input.editedAt ?? null,
+                    patch: { ...(oldContent !== undefined && oldContent !== null ? { content: oldContent } : {}),
+                        ...(oldEdited !== undefined ? { editedAt: oldEdited } : {}),
+                        ...(input.content !== undefined ? { content: input.content } : {}),
+                        ...(input.editedAt !== undefined ? { editedAt: input.editedAt } : {}) } };
+            } else {
+                event = { ...base, type: "message.delete", sourceTimestamp: null };
+            }
+            // Edits replace live content; deletes purge all buffered versions, including imported copies.
+            state.records = state.records.filter(r => !(sameMessage(r.event) && (input.type === "delete" || r.event.source === "vencord-live")));
+            state.records.push({ digest: await digest(event), event });
+            this.active(state, grantId);
+            if (state.records.length > 5000) throw new Error("Buffer capacity reached. Live capture must stop.");
+            this.audit(state, `live-${input.type}`, grantId, 1);
+            return true;
+        });
+    }
     async export(grantId: string, passphrase: string, confirmed: boolean): Promise<Envelope> {
         if (confirmed !== true) throw new Error("Confirm export to the named principal first.");
         return this.mutate(async state => {

@@ -22,6 +22,7 @@
           "enum": [
             "manual",
             "discord-data-package",
+            "vencord-live",
             "authorized-bot"
           ]
         },
@@ -126,6 +127,7 @@
           "type": "string",
           "enum": [
             "user-supplied",
+            "client-observed",
             "authorized-source"
           ]
         },
@@ -224,7 +226,10 @@
         },
         "source": {
           "type": "string",
-          "const": "authorized-bot"
+          "enum": [
+            "authorized-bot",
+            "vencord-live"
+          ]
         },
         "accountId": {
           "type": "string",
@@ -327,6 +332,7 @@
           "type": "string",
           "enum": [
             "user-supplied",
+            "client-observed",
             "authorized-source"
           ]
         },
@@ -419,7 +425,10 @@
         },
         "source": {
           "type": "string",
-          "const": "authorized-bot"
+          "enum": [
+            "authorized-bot",
+            "vencord-live"
+          ]
         },
         "accountId": {
           "type": "string",
@@ -522,6 +531,7 @@
           "type": "string",
           "enum": [
             "user-supplied",
+            "client-observed",
             "authorized-source"
           ]
         },
@@ -626,7 +636,10 @@
         },
         "source": {
           "type": "string",
-          "const": "authorized-bot"
+          "enum": [
+            "authorized-bot",
+            "vencord-live"
+          ]
         },
         "accountId": {
           "type": "string",
@@ -729,6 +742,7 @@
           "type": "string",
           "enum": [
             "user-supplied",
+            "client-observed",
             "authorized-source"
           ]
         },

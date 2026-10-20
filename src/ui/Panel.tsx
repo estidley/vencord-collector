@@ -1,5 +1,6 @@
 import type * as ReactTypes from "react";
 import { Collector } from "../core/collector";
+import type { LiveCapture } from "../core/live";
 import { MAX_INPUT_BYTES, parseJson } from "../core/schema";
 
 export function exampleGrant() {
@@ -15,9 +16,14 @@ export function exampleGrant() {
 }
 
 // React is supplied by the host. The Vencord bundle uses Discord's React; the offline app uses its own.
-export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "useState" | "useRef" | "useEffect">, collector: Collector) {
+export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "useState" | "useRef" | "useEffect">, collector: Collector, live?: LiveCapture) {
     return function Panel() {
         const [status, setStatus] = React.useState(collector.status());
+        const [liveStatus, setLiveStatus] = React.useState(live?.status());
+        const [liveConfirmed, setLiveConfirmed] = React.useState(false);
+        const [showAll, setShowAll] = React.useState(false);
+        const [allRiskConfirmed, setAllRiskConfirmed] = React.useState(false);
+        const [allAuthority, setAllAuthority] = React.useState(false);
         const [message, setMessage] = React.useState("Locked. Create or unlock your encrypted buffer.");
         const [busy, setBusy] = React.useState(false);
         const [draft, setDraft] = React.useState(() => JSON.stringify(exampleGrant(), null, 2));
@@ -36,26 +42,28 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
         function clearImport() { setInput(""); setPreview(undefined); setConfirmed(false); if (file.current) file.current.value = ""; }
         function touch() {
             clearTimeout(timer.current);
-            if (collector.unlocked) timer.current = setTimeout(() => collector.lock(), 5 * 60_000);
+            if (collector.unlocked && !live?.active) timer.current = setTimeout(() => { if (!live?.active) collector.lock(); }, 5 * 60_000);
         }
         React.useEffect(() => {
             mounted.current = true;
             const unsubscribe = collector.subscribe(() => {
                 setStatus(collector.status());
                 if (!collector.unlocked) {
-                    clearImport(); setExportConfirmed(false); setAttested(false); setGrantId("");
+                    clearImport(); setExportConfirmed(false); setLiveConfirmed(false); setAttested(false); setGrantId("");
+                    setShowAll(false); setAllRiskConfirmed(false); setAllAuthority(false);
                     setDraft(JSON.stringify(exampleGrant(), null, 2));
                     if (password.current) password.current.value = "";
                     if (transferPassword.current) transferPassword.current.value = "";
                     setMessage("Locked. Local data remains encrypted.");
                 }
             });
-            const hidden = () => { if (document.hidden) collector.lock(); };
+            const unsubscribeLive = live?.subscribe(() => setLiveStatus(live.status()));
+            const hidden = () => { if (document.hidden && !live?.active) collector.lock(); };
             const lock = () => collector.lock();
             document.addEventListener("visibilitychange", hidden);
             window.addEventListener("pagehide", lock);
             return () => {
-                mounted.current = false; unsubscribe(); clearTimeout(timer.current); collector.lock();
+                mounted.current = false; unsubscribe(); unsubscribeLive?.(); clearTimeout(timer.current); if (!live?.active) collector.lock();
                 document.removeEventListener("visibilitychange", hidden); window.removeEventListener("pagehide", lock);
             };
         }, []);
@@ -68,8 +76,10 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
         const field: ReactTypes.CSSProperties = { display: "block", margin: "12px 0" };
         const control: ReactTypes.CSSProperties = { width: "100%", boxSizing: "border-box", padding: 8, color: "#18212c", background: "#fff", border: "1px solid #8b97a5", borderRadius: 4 };
         return <section style={{ background: "#f5f7fa", color: "#18212c", padding: 20, borderRadius: 8, fontFamily: "system-ui", lineHeight: 1.5 }} onInput={touch} onClick={touch}>
-            <h2>Conversation import</h2>
-            <p>Import files you choose into an encrypted local buffer. No live Discord capture or history fetching.</p>
+            <h2>Conversation collector</h2>
+            <p>{live ? "Choose file imports or explicitly start live capture for selected conversations. No history fetching." : "Import files you choose into an encrypted local buffer. For live capture, install the Vencord plugin and open its settings inside Discord. This browser app cannot see Discord messages."}</p>
+            {live && <p>Vencord is an unofficial client modification and violates Discord's Terms of Service. Participant permission does not provide platform approval.</p>}
+            {liveStatus && <p aria-live="polite">{liveStatus.active ? `Live: ${liveStatus.allConversations ? "ALL conversations on this account" : `${liveStatus.grantIds.length} conversation(s)`}, ${liveStatus.saved} changes saved. Ends ${new Date(liveStatus.endsAt!).toLocaleTimeString()}.` : liveStatus.notice}</p>}
             <p role="status" aria-live="polite">{message}</p>
             {!collector.available && <p>Enable this plugin to use the local import panel.</p>}
             {!status.unlocked ? <form onSubmit={e => {
@@ -83,33 +93,58 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
                 <button disabled={busy || !collector.available}>Create or unlock buffer</button>
                 <p>Keep this passphrase safe. There is no recovery. Clearing this site's storage removes the buffer.</p>
             </form> : <>
-                <p><strong>{status.count} snapshots buffered</strong> · Locks after five minutes without interaction, when hidden, or when this panel closes.</p>
+                <p><strong>{status.count} records buffered</strong> · {liveStatus?.active ? "Live capture keeps the buffer unlocked while this panel is closed or hidden, until the session ends." : "Locks after five minutes without interaction, when hidden, or when this panel closes."}</p>
                 <button onClick={() => collector.lock()}>Lock now</button>{" "}
                 <button disabled={busy} onClick={() => void run(async () => { await collector.prune(); return "Expired snapshots removed."; })}>Remove expired snapshots</button>
+                {live && <fieldset disabled={busy} style={{ marginTop: 20, border: "2px solid #a35313" }}>
+                    <legend>Account-wide live capture</legend>
+                    <button disabled={liveStatus?.active} onClick={() => { setShowAll(!showAll); setAllRiskConfirmed(false); setAllAuthority(false); }}>Allow all conversations — at my own risk</button>
+                    {showAll && <div>
+                        <p>This includes every supported DM, group DM, server channel and thread delivered to the signed-in account, including newly joined conversations and all senders. It does not fetch history or bypass access controls. Vencord violates Discord's Terms of Service and may put your account at risk.</p>
+                        <p>The buffer remains unlocked for up to one hour, including when this panel is closed or hidden. Local retention defaults to seven days; export stays off. Capture stops if storage or the pending queue fills. Use selected conversations if you cannot authorize this whole scope.</p>
+                        <label style={field}><input type="checkbox" checked={allAuthority} onChange={e => setAllAuthority(e.target.checked)} /> I have authority and any required participant permission to store messages across all these conversations.</label>
+                        <label style={field}><input type="checkbox" checked={allRiskConfirmed} onChange={e => setAllRiskConfirmed(e.target.checked)} /> I accept the account and privacy risks of all-conversations capture and the one-hour unlocked session.</label>
+                        <button disabled={!allAuthority || !allRiskConfirmed || liveStatus?.active} onClick={() => void run(async () => {
+                            const grant = await collector.grant(live.allDraft(), allAuthority);
+                            await live.start(grant.grantId, allRiskConfirmed, allRiskConfirmed);
+                            setGrantId(grant.grantId); clearImport(); setExportConfirmed(false); setLiveConfirmed(false);
+                            setShowAll(false); setAllRiskConfirmed(false); setAllAuthority(false);
+                            return "All-conversations live capture started for this account. Stop live capture or Lock now ends the session.";
+                        })}>Start all conversations for one hour</button>
+                    </div>}
+                </fieldset>}
                 <fieldset disabled={busy} style={{ marginTop: 20 }}>
                     <legend>1. Authorize a conversation</legend>
                     <p>Edit the example IDs and scope below. For an official messages.json file, set source to discord-data-package and use only your own sender ID. Names and missing metadata may be null; never guess IDs.</p>
+                    {live && <button onClick={() => void run(async () => { setDraft(JSON.stringify(live.currentDraft(), null, 2)); setAttested(false); return "Review the current conversation and sender list, then save its permission."; })}>Use current Discord conversation</button>}
                     <label style={field}>Conversation permission (JSON)
                         <textarea rows={14} value={draft} onChange={e => { setDraft(e.target.value); setAttested(false); }} style={{ ...control, fontFamily: "monospace" }} />
                     </label>
                     <label style={field}><input type="checkbox" checked={attested} onChange={e => setAttested(e.target.checked)} /> I have authority to store these specific messages for the stated purpose and any required participant permission. This does not grant Discord platform approval.</label>
                     <button disabled={!attested} onClick={() => void run(async () => {
                         const grant = await collector.grant(parseJson(draft), attested);
-                        setGrantId(grant.grantId); setAttested(false); clearImport(); setExportConfirmed(false);
-                        return "Conversation permission saved. Choose a local file to review.";
+                        setGrantId(grant.grantId); setAttested(false); clearImport(); setExportConfirmed(false); setLiveConfirmed(false);
+                        return grant.source === "vencord-live" ? "Permission saved. Live capture stays off until you press Start live capture." : "Conversation permission saved. Choose a local file to review.";
                     })}>Save permission</button>
                 </fieldset>
                 <fieldset disabled={busy} style={{ marginTop: 20 }}>
-                    <legend>2. Review and import</legend>
+                    <legend>2. Choose a permission and capture method</legend>
                     <label style={field}>Conversation permission
-                        <select value={grantId} onChange={e => { setGrantId(e.target.value); clearImport(); setExportConfirmed(false); }} style={control}>
+                        <select value={grantId} onChange={e => { setGrantId(e.target.value); clearImport(); setExportConfirmed(false); setLiveConfirmed(false); }} style={control}>
                             <option value="">Choose a permission</option>
                             {status.grants.filter(g => !g.revokedAt && Date.parse(g.expiresAt) > Date.now()).map(g =>
-                                <option key={g.grantId} value={g.grantId}>{g.provenance.kind} · {g.provenance.channelId} · {g.source} · {g.principalId}</option>)}
+                                <option key={g.grantId} value={g.grantId}>{g.scope === "account" ? "ALL conversations" : `${g.provenance?.kind} · ${g.provenance?.channelId}`} · {g.source} · {g.principalId}</option>)}
                         </select>
                     </label>
+                    {live && activeGrant?.source === "vencord-live" && <div>
+                        <p>Only new events delivered to this Discord client are observed. Offline gaps are not filled. Edits replace buffered live text; observed deletes remove buffered copies. Text only; attachments are excluded.</p>
+                        <label style={field}><input type="checkbox" checked={liveConfirmed} onChange={e => setLiveConfirmed(e.target.checked)} /> Keep the buffer unlocked for a live session of up to one hour, even with this panel closed or hidden.</label>
+                        {activeGrant.scope === "account" && <label style={field}><input type="checkbox" checked={allRiskConfirmed} onChange={e => setAllRiskConfirmed(e.target.checked)} /> I accept the account and privacy risks of capturing all conversations, including newly joined channels and all senders.</label>}
+                        <button disabled={!liveConfirmed || (activeGrant.scope === "account" && !allRiskConfirmed) || liveStatus?.grantIds.includes(grantId)} onClick={() => void run(async () => { await live.start(grantId, liveConfirmed, allRiskConfirmed); setLiveConfirmed(false); setAllRiskConfirmed(false); return "Live capture started for the selected permission."; })}>Start live capture</button>
+                    </div>}
+                    {liveStatus?.active && <button onClick={() => live?.stop()}>Stop live capture and lock</button>}
                     <label style={field}>Local JSON file (up to 2 MiB / 1,000 messages)
-                        <input ref={file} disabled={!grantId} type="file" accept=".json,application/json" onChange={e => {
+                        <input ref={file} disabled={!grantId || activeGrant?.source === "vencord-live"} type="file" accept=".json,application/json" onChange={e => {
                             const chosen = e.target.files?.[0]; clearImport(); if (!chosen) return;
                             void run(async () => {
                                 if (chosen.size > MAX_INPUT_BYTES) throw new Error("File exceeds the 2 MiB import limit.");

@@ -4,7 +4,7 @@ export const MAX_INPUT_BYTES = 2 * 1024 * 1024;
 export const MAX_VAULT_BYTES = 8 * 1024 * 1024;
 export const id = z.string().regex(/^[0-9]{1,20}$/);
 export const instant = z.iso.datetime({ offset: true });
-export const source = z.enum(["manual", "discord-data-package"]);
+export const source = z.enum(["manual", "discord-data-package", "vencord-live"]);
 
 export const provenanceSchema = z.strictObject({
     kind: z.enum(["guild-channel", "guild-thread", "dm", "group-dm", "unknown"]),
@@ -33,14 +33,19 @@ export const manualInputSchema = z.strictObject({
 });
 
 export const grantDraftSchema = z.strictObject({
-    source, accountId: id, provenance: provenanceSchema,
-    allowedSenderIds: z.array(id).min(1).max(100),
+    source, accountId: id, scope: z.enum(["conversation", "account"]).default("conversation"),
+    provenance: provenanceSchema.nullable(),
+    allowedSenderIds: z.array(id).max(100),
     purpose: z.string().trim().min(5).max(300),
     expiresAt: instant,
     retentionDays: z.number().int().min(1).max(30),
     allowExport: z.boolean(),
     principalId: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/)
 }).superRefine((g, c) => {
+    if (g.scope === "account" && (g.source !== "vencord-live" || g.provenance !== null || g.allowedSenderIds.length !== 0))
+        c.addIssue({ code: "custom", message: "Account scope is live-only, with per-event provenance and all senders." });
+    if (g.scope === "conversation" && (!g.provenance || !g.allowedSenderIds.length))
+        c.addIssue({ code: "custom", message: "Conversation scope requires provenance and explicit senders." });
     if (g.source === "discord-data-package" && (g.allowedSenderIds.length !== 1 || g.allowedSenderIds[0] !== g.accountId))
         c.addIssue({ code: "custom", message: "A data package contains only the account owner's messages." });
 });
@@ -50,11 +55,20 @@ export const grantSchema = grantDraftSchema.safeExtend({
 });
 export type Grant = z.infer<typeof grantSchema>;
 
+export function permitsSender(grant: Grant, senderId: string): boolean {
+    return grant.scope === "account" || grant.allowedSenderIds.includes(senderId);
+}
+export function permitsProvenance(grant: Grant, provenance: Provenance): boolean {
+    return grant.scope === "account"
+        ? provenance.kind !== "unknown" && (!(provenance.kind === "dm" || provenance.kind === "group-dm") || provenance.participantIds.includes(grant.accountId))
+        : !!grant.provenance && sameConversation(grant.provenance, provenance);
+}
+
 const baseEvent = {
     version: z.literal(1), eventId: z.uuid(), messageId: id,
-    source: z.enum(["manual", "discord-data-package", "authorized-bot"]),
+    source: z.enum(["manual", "discord-data-package", "vencord-live", "authorized-bot"]),
     accountId: id, provenance: provenanceSchema,
-    provenanceEvidence: z.enum(["user-supplied", "authorized-source"]),
+    provenanceEvidence: z.enum(["user-supplied", "client-observed", "authorized-source"]),
     grantId: z.uuid(), observedAt: instant, expiresAt: instant,
     sourceTimestamp: instant.nullable(), senderId: id.nullable()
 };
@@ -62,17 +76,17 @@ export const eventSchema = z.discriminatedUnion("type", [
     z.strictObject({ ...baseEvent, type: z.literal("message.snapshot"),
         senderId: id, createdAt: instant, editedAt: instant.nullable(), content: z.string().max(20_000) }),
     z.strictObject({ ...baseEvent, type: z.literal("message.create"),
-        source: z.literal("authorized-bot"), senderId: id, createdAt: instant, content: z.string().max(20_000).nullable() }),
-    z.strictObject({ ...baseEvent, type: z.literal("message.update"), source: z.literal("authorized-bot"),
+        source: z.enum(["authorized-bot", "vencord-live"]), senderId: id, createdAt: instant, content: z.string().max(20_000).nullable() }),
+    z.strictObject({ ...baseEvent, type: z.literal("message.update"), source: z.enum(["authorized-bot", "vencord-live"]),
         // Missing content means unchanged/unavailable; an empty string is an actual supplied value.
         patch: z.strictObject({ content: z.string().max(20_000).optional(), editedAt: instant.nullable().optional() }) }),
-    z.strictObject({ ...baseEvent, type: z.literal("message.delete"), source: z.literal("authorized-bot") })
+    z.strictObject({ ...baseEvent, type: z.literal("message.delete"), source: z.enum(["authorized-bot", "vencord-live"]) })
 ]);
 export type MessageEvent = z.infer<typeof eventSchema>;
 
 export const auditSchema = z.strictObject({
     auditId: z.uuid(), at: instant,
-    action: z.enum(["grant", "import", "export", "revoke", "prune"]),
+    action: z.enum(["grant", "import", "export", "revoke", "prune", "live-start", "live-create", "live-update", "live-delete"]),
     grantId: z.uuid().nullable(), count: z.number().int().nonnegative()
 });
 export const stateSchema = z.strictObject({
@@ -88,6 +102,21 @@ export const batchSchema = z.strictObject({
     grant: grantSchema, events: z.array(eventSchema).min(1).max(5000)
 });
 export type Batch = z.infer<typeof batchSchema>;
+
+export const liveObservationSchema = z.discriminatedUnion("type", [
+    z.strictObject({ type: z.literal("create"), messageId: id, channelId: id, senderId: id,
+        createdAt: instant, content: z.string().max(20_000) }),
+    z.strictObject({ type: z.literal("update"), messageId: id, channelId: id, senderId: id.optional(),
+        content: z.string().max(20_000).optional(), editedAt: instant.nullable().optional() }),
+    z.strictObject({ type: z.literal("delete"), messageId: id, channelId: id })
+]);
+export type LiveObservation = z.infer<typeof liveObservationSchema>;
+
+export function sameConversation(a: Provenance, b: Provenance): boolean {
+    return a.kind === b.kind && a.channelId === b.channelId && a.guildId === b.guildId &&
+        a.parentChannelId === b.parentChannelId && a.threadId === b.threadId &&
+        [...a.participantIds].sort().join(",") === [...b.participantIds].sort().join(",");
+}
 
 export function parseJson(text: string): unknown {
     if (new TextEncoder().encode(text).byteLength > MAX_INPUT_BYTES) throw new Error("File exceeds the 2 MiB import limit.");

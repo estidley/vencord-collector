@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "GPL-3.0-or-later",
-  "description": "Local, user-directed conversation imports and encrypted coordination handoff; no Discord collection automation.",
+  "description": "Opt-in Vencord live capture, local file imports, and encrypted personal coordination handoff.",
   "engines": {
     "node": ">=22"
   },

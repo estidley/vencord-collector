@@ -41,108 +41,123 @@
           "type": "string",
           "enum": [
             "manual",
-            "discord-data-package"
+            "discord-data-package",
+            "vencord-live"
           ]
         },
         "accountId": {
           "type": "string",
           "pattern": "^[0-9]{1,20}$"
         },
+        "scope": {
+          "default": "conversation",
+          "type": "string",
+          "enum": [
+            "conversation",
+            "account"
+          ]
+        },
         "provenance": {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "enum": [
-                "guild-channel",
-                "guild-thread",
-                "dm",
-                "group-dm",
-                "unknown"
-              ]
-            },
-            "guildId": {
-              "anyOf": [
-                {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "guild-channel",
+                    "guild-thread",
+                    "dm",
+                    "group-dm",
+                    "unknown"
+                  ]
+                },
+                "guildId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9]{1,20}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "guildName": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "channelId": {
                   "type": "string",
                   "pattern": "^[0-9]{1,20}$"
                 },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "guildName": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 200
+                "channelName": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "channelId": {
-              "type": "string",
-              "pattern": "^[0-9]{1,20}$"
-            },
-            "channelName": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 200
+                "parentChannelId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9]{1,20}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "parentChannelId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^[0-9]{1,20}$"
+                "threadId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[0-9]{1,20}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
-                {
-                  "type": "null"
+                "participantIds": {
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[0-9]{1,20}$"
+                  }
                 }
-              ]
+              },
+              "required": [
+                "kind",
+                "guildId",
+                "guildName",
+                "channelId",
+                "channelName",
+                "parentChannelId",
+                "threadId",
+                "participantIds"
+              ],
+              "additionalProperties": false
             },
-            "threadId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^[0-9]{1,20}$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "participantIds": {
-              "maxItems": 100,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[0-9]{1,20}$"
-              }
+            {
+              "type": "null"
             }
-          },
-          "required": [
-            "kind",
-            "guildId",
-            "guildName",
-            "channelId",
-            "channelName",
-            "parentChannelId",
-            "threadId",
-            "participantIds"
-          ],
-          "additionalProperties": false
+          ]
         },
         "allowedSenderIds": {
-          "minItems": 1,
           "maxItems": 100,
           "type": "array",
           "items": {
@@ -202,6 +217,7 @@
       "required": [
         "source",
         "accountId",
+        "scope",
         "provenance",
         "allowedSenderIds",
         "purpose",
@@ -243,6 +259,7 @@
                 "enum": [
                   "manual",
                   "discord-data-package",
+                  "vencord-live",
                   "authorized-bot"
                 ]
               },
@@ -347,6 +364,7 @@
                 "type": "string",
                 "enum": [
                   "user-supplied",
+                  "client-observed",
                   "authorized-source"
                 ]
               },
@@ -445,7 +463,10 @@
               },
               "source": {
                 "type": "string",
-                "const": "authorized-bot"
+                "enum": [
+                  "authorized-bot",
+                  "vencord-live"
+                ]
               },
               "accountId": {
                 "type": "string",
@@ -548,6 +569,7 @@
                 "type": "string",
                 "enum": [
                   "user-supplied",
+                  "client-observed",
                   "authorized-source"
                 ]
               },
@@ -640,7 +662,10 @@
               },
               "source": {
                 "type": "string",
-                "const": "authorized-bot"
+                "enum": [
+                  "authorized-bot",
+                  "vencord-live"
+                ]
               },
               "accountId": {
                 "type": "string",
@@ -743,6 +768,7 @@
                 "type": "string",
                 "enum": [
                   "user-supplied",
+                  "client-observed",
                   "authorized-source"
                 ]
               },
@@ -847,7 +873,10 @@
               },
               "source": {
                 "type": "string",
-                "const": "authorized-bot"
+                "enum": [
+                  "authorized-bot",
+                  "vencord-live"
+                ]
               },
               "accountId": {
                 "type": "string",
@@ -950,6 +979,7 @@
                 "type": "string",
                 "enum": [
                   "user-supplied",
+                  "client-observed",
                   "authorized-source"
                 ]
               },

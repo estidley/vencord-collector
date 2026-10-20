@@ -1,21 +1,21 @@
 # Verification report
 
-Initial implementation verified 2026-10-19 in the separate `vencord-message-collector` Git repository. Pulse code was not opened for editing, imported, or changed. Verification used no deployment, Discord session, or external message.
+Live-plus-import implementation verified 2026-10-19 in the separate `vencord-message-collector` Git repository. Pulse code was not opened for editing, imported, or changed. Verification used synthetic messages and a synthetic browser host, with no Discord session or client injection.
 
 ## Results
 
 | Check | Result |
 |---|---|
 | `npm run typecheck` | Passed: strict shared core/UI/standalone/test checks |
-| `npm test` | **21 passed, 0 failed** |
+| `npm test` | **38 passed, 0 failed** |
 | `npm run schema` | Generated five versioned JSON Schema files |
 | `npm run build` | Passed: standalone web app and bundled private Vencord userplugin |
-| `npm run test:browser` | **3 passed, 0 failed**, real headless Chromium |
+| `npm run test:browser` | **6 passed, 0 failed**, real headless Chromium; three file flows and three synthetic Vencord panel flows |
 | `npm run check:vencord -- <checkout>` | Passed: original plugin source checked against actual Vencord aliases/types |
 | Vencord `pnpm build --standalone` with generated plugin present | Passed: desktop/main/preload/renderer artifacts |
 | Vencord `pnpm testTsc` with generated plugin present | Passed |
 
-Environment: Windows, Node.js 25.6.1, npm 11.9.0, Playwright 1.64.1 / Chromium 156.0.8078.4. Vencord reference commit: `32c90633ce6a95d7e56c95479efbb431bacf1eac`; dependencies installed from its frozen lockfile. The package declares Node 22+, but Node 22 itself was not exercised locally. A GitHub Actions workflow for Node 22 is included but has not run remotely.
+Environment: Windows, Node.js 25.6.1, npm 11.9.0, Playwright 1.64.1 / Chromium 156.0.8078.4. Vencord reference commit: `32c90633ce6a95d7e56c95479efbb431bacf1eac`; dependencies installed from its frozen lockfile. The package declares Node 22+, but Node 22 itself was not exercised locally. A GitHub Actions workflow for Node 22 is included; the results above describe local checks. Browser tests use isolated ports 4318/4319 so they do not stop the owner's app on 4317.
 
 ## Coverage
 
@@ -26,16 +26,21 @@ Environment: Windows, Node.js 25.6.1, npm 11.9.0, Playwright 1.64.1 / Chromium 1
 - Atomic failure on storage error, concurrent session conflict, real IndexedDB browser persistence and IndexedDB transaction CAS via fake-indexeddb.
 - Deduplication, stable event IDs across handoff retries, recipient/scope/expiry checks, local-only export denial.
 - Retention and revocation, 5,000-snapshot capacity, lock during import/unlock, partial update and content-free deletion schema.
-- Host React late initialization and Vencord start/stop compatibility using a test harness; no message hooks are registered.
+- Host React/store late initialization, disabled-by-default behavior and the exact Flux subscription set using a test harness.
 - Complete browser grant → safe text preview → import → reload → encrypted download → decoder → revoke → lock workflow; zero external requests observed during that workflow.
 - Browser rejection of out-of-scope senders and clearing of an unimported preview after five minutes of inactivity.
 
-Two initial browser test failures came from a locator that included option text and setting a file before permission-saving controls were re-enabled. The test harness now waits for enabled controls and uses the combobox role. The complete final browser suite passes. Source compatibility checks also led to deferring React lookup until panel render and aligning React type definitions with upstream; both are included in the final code.
+- Both sides of a DM; unselected scope/sender/optimistic/ephemeral filtering; Date/ISO timestamp normalization; attachment omission; duplicate creates; partial edits; latest live content replacement; known bulk deletions and cross-source purging; retained tombstones block stale reimports.
+- Live permission/account/scope checks, membership changes, account switching, revocation, one-hour/permission expiry, queue overflow, storage failure, and serialized live/import writes.
+- Account-wide risk confirmation, mutual exclusion with selected mode, newly observed DMs/group DMs/server channels/threads, all senders, actual per-event provenance, unsupported metadata skipping, account binding and scope-aware encrypted export.
+- Browser confirmation controls, capture while the panel is hidden/unmounted, continued capture beyond the ordinary idle lock, file import during capture, automatic one-hour lock, account-wide confirmation, and no automatic restart after reload.
+
+The browser fixture is compiled only by a test server. It is absent from both production build entry points and never connects to Discord. Source compatibility checks use the actual upstream aliases/types, while the generated plugin is also included in the upstream build and type check.
 
 ## Not verified / remaining blockers
 
 1. No logged-in Discord runtime test or Vencord injection was performed. Upstream build/source compatibility is verified, not platform approval or future client compatibility.
-2. Continuous collection through a modified client is not implemented. See `POLICY.md` for the platform restriction and an official bot/interaction design. A bot service, permissions/intent review, consent handling and deployment remain future work.
+2. Live capture is implemented but unofficial, not platform-approved, and not a completeness guarantee. It is bounded to explicit sessions and events delivered to the client. No history, offline backfill, token access, attachments, voice recording, bot deployment, or independent consent service is implemented. High-volume account-wide capture can exhaust its queue/vault and stop.
 3. Official export import was tested with synthetic documented-format fixtures, not the user's real package. Legacy CSV, changed layouts and numeric IDs need a lossless offline conversion adapter.
 4. `personal-coordination-mcp` is not implemented here. The file protocol and decoder are ready for integration, but authenticated receiver ACLs, SQL/search, durable agent-access auditing and downstream revocation are not provided.
 5. Encryption is browser-profile storage protection, not renderer isolation or verifiable secure deletion. Audit history is bounded, owner-controlled and not tamper-evident. See `SECURITY.md` for exact retention and trust boundaries.

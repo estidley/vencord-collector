@@ -5,11 +5,11 @@ import { decodeBatch } from "../../src/core/connector";
 test("real browser: grant, preview text safely, import, reload, export, revoke", async ({ page }) => {
     const errors: string[] = []; const external: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    page.on("request", req => { if (!req.url().startsWith("http://127.0.0.1:4317")) external.push(req.url()); });
+    page.on("request", req => { if (!req.url().startsWith("http://127.0.0.1:4318")) external.push(req.url()); });
     await page.goto("/");
     await page.getByLabel("Buffer passphrase").fill("strong browser testing passphrase");
     await page.getByRole("button", { name: "Create or unlock buffer" }).click();
-    await expect(page.getByText("0 snapshots buffered")).toBeVisible();
+    await expect(page.getByText("0 records buffered")).toBeVisible();
     const scope = page.getByLabel("Conversation permission (JSON)");
     const draft = JSON.parse(await scope.inputValue()); draft.allowExport = true;
     await scope.fill(JSON.stringify(draft));
@@ -21,11 +21,11 @@ test("real browser: grant, preview text safely, import, reload, export, revoke",
     await expect(page.locator("pre")).toContainText("<img"); await expect(page.locator("pre img")).toHaveCount(0);
     await page.getByLabel("Import all 1 reviewed messages").check();
     await page.getByRole("button", { name: "Import reviewed messages" }).click();
-    await expect(page.getByText("1 snapshots buffered")).toBeVisible();
-    await page.reload(); await expect(page.getByText("1 snapshots buffered")).toHaveCount(0);
+    await expect(page.getByText("1 records buffered")).toBeVisible();
+    await page.reload(); await expect(page.getByText("1 records buffered")).toHaveCount(0);
     await page.getByLabel("Buffer passphrase").fill("strong browser testing passphrase");
     await page.getByRole("button", { name: "Create or unlock buffer" }).click();
-    await expect(page.getByText("1 snapshots buffered")).toBeVisible();
+    await expect(page.getByText("1 records buffered")).toBeVisible();
     await page.getByRole("combobox", { name: "Conversation permission" }).selectOption({ index: 1 });
     await page.getByLabel("Separate transfer passphrase").fill("strong browser transfer passphrase");
     await page.getByLabel("Export this conversation").check();
@@ -35,7 +35,7 @@ test("real browser: grant, preview text safely, import, reload, export, revoke",
     const batch = await decodeBatch(encrypted, "strong browser transfer passphrase", "owner");
     expect(batch.events).toHaveLength(1);
     await page.getByRole("button", { name: "Revoke permission" }).click();
-    await expect(page.getByText("0 snapshots buffered")).toBeVisible();
+    await expect(page.getByText("0 records buffered")).toBeVisible();
     await page.getByRole("button", { name: "Lock now" }).click();
     await expect(page.getByLabel("Buffer passphrase")).toBeVisible();
     expect(errors).toEqual([]); expect(external).toEqual([]);
@@ -49,7 +49,7 @@ test("browser rejects an out-of-scope import without persisting it", async ({ pa
     await expect(page.getByLabel("Local JSON file")).toBeEnabled();
     await page.getByLabel("Local JSON file").setInputFiles({ name: "wrong.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(sample)) });
     await expect(page.getByRole("status")).toContainText("sender outside");
-    await expect(page.getByText("0 snapshots buffered")).toBeVisible();
+    await expect(page.getByText("0 records buffered")).toBeVisible();
 });
 
 test("five-minute inactivity drops the unlocked session and clears an unimported preview", async ({ page }) => {

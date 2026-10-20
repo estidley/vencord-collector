@@ -1,5 +1,5 @@
 import { derive, envelopeSchema, open } from "./crypto";
-import { batchSchema, parseSafe, type Batch } from "./schema";
+import { batchSchema, parseSafe, permitsProvenance, permitsSender, type Batch } from "./schema";
 
 /** Reference decoder only. A real receiver must ALSO authenticate its principal and check its own ACL/revocations. */
 export async function decodeBatch(envelope: unknown, passphrase: string, expectedPrincipal: string, now = Date.now()): Promise<Batch> {
@@ -12,8 +12,11 @@ export async function decodeBatch(envelope: unknown, passphrase: string, expecte
         throw new Error("Handoff is expired or not authorized for this principal.");
     const ids = new Set<string>();
     for (const e of batch.events) {
-        if (e.type !== "message.snapshot" || e.grantId !== g.grantId || e.accountId !== g.accountId || e.source !== g.source ||
-            !e.senderId || !g.allowedSenderIds.includes(e.senderId) || JSON.stringify(e.provenance) !== JSON.stringify(g.provenance) ||
+        const allowedType = g.source === "vencord-live"
+            ? ["message.create", "message.update", "message.delete"].includes(e.type) && e.provenanceEvidence === "client-observed"
+            : e.type === "message.snapshot";
+        if (!allowedType || e.grantId !== g.grantId || e.accountId !== g.accountId || e.source !== g.source ||
+            !e.senderId || !permitsSender(g, e.senderId) || !permitsProvenance(g, e.provenance) ||
             Date.parse(e.expiresAt) <= now || Date.parse(e.expiresAt) > Date.parse(g.expiresAt) ||
             Date.parse(batch.expiresAt) > Date.parse(e.expiresAt) || ids.has(e.eventId))
             throw new Error("Handoff event is outside its permission or duplicates an event ID.");

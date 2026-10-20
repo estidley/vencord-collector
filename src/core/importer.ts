@@ -16,6 +16,8 @@ function packageTime(raw: string): string {
 }
 
 export function parseImport(text: string, grant: Grant) {
+    if (grant.source === "vencord-live") throw new Error("Choose a file-import permission for this file. Live permissions accept client events only.");
+    if (!grant.provenance || grant.scope === "account") throw new Error("Files require a specific conversation permission.");
     const input = parseJson(text);
     if (grant.source === "discord-data-package") {
         const rows = parseSafe(packageRows, input);
