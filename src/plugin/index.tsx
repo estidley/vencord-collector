@@ -7,6 +7,8 @@ import { channelProvenance, LiveCapture } from "../core/live";
 import { IndexedDbStorage } from "../core/storage";
 import { AlwaysOn } from "../core/always-on";
 import type { AutoProtection } from "../core/auto-config";
+import { SyncController } from "../core/sync";
+import type { SyncNative } from "../core/sync-config";
 import { createPanel } from "../ui/Panel";
 
 const storage = new IndexedDbStorage();
@@ -32,21 +34,22 @@ const activity = new ActivityCapture(collector, live, {
     voice: (guildId, userId) => VoiceStateStore?.getVoiceState(guildId, userId)?.channelId,
     guildForChannel: channelId => ChannelStore?.getChannel(channelId)?.guild_id
 });
-const always = new AlwaysOn(collector, live, storage,
-    () => typeof VencordNative !== "undefined" ? VencordNative.pluginHelpers?.MessageCollector as unknown as AutoProtection | undefined : undefined,
-    currentAccount);
+const nativeHelper = () => typeof VencordNative !== "undefined" ? VencordNative.pluginHelpers?.MessageCollector as unknown as (AutoProtection & SyncNative) | undefined : undefined;
+// Receiver sync is off unless explicitly armed during always-on setup; the token stays inside the native helper.
+const sync: SyncController = new SyncController(collector, storage, nativeHelper, currentAccount, () => always.grantId);
+const always = new AlwaysOn(collector, live, storage, nativeHelper, currentAccount, sync);
 let watcher: ReturnType<typeof setInterval> | undefined;
 let observedAccount: string | undefined;
 function ready() {
     const account = currentAccount();
     if (observedAccount && account !== observedAccount) always.accountChanged();
-    observedAccount = account; live.checkAccount(); void always.restore(); activity.poll();
+    observedAccount = account; live.checkAccount(); void always.restore(); activity.poll(); void sync.tick();
 }
 let Panel: ReturnType<typeof createPanel> | undefined;
 
 function SettingsPanel() {
     // Vencord's React export is resolved after plugin modules load. Read it only at render time.
-    Panel ??= createPanel(React, collector, live, always);
+    Panel ??= createPanel(React, collector, live, always, sync);
     return <Panel />;
 }
 

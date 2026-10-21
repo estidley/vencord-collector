@@ -45,6 +45,25 @@ export class IndexedDbStorage implements VaultStorage {
             tx.onabort = tx.onerror = () => { db.close(); reject(new Error("Unable to update automatic-unlock settings.")); };
         });
     }
+    // OS-protected receiver sync settings. Opaque here: only the native helper can decrypt them.
+    async readSync(): Promise<string | undefined> {
+        const db = await this.connect();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("vault", "readonly"); const req = tx.objectStore("vault").get("sync");
+            tx.oncomplete = () => { db.close(); const value = req.result; if (value !== undefined && (typeof value !== "string" || value.length > 16384)) reject(new Error("Invalid sync record.")); else resolve(value); };
+            tx.onabort = tx.onerror = () => { db.close(); reject(new Error("Unable to read sync settings.")); };
+        });
+    }
+    async writeSync(ciphertext: string | undefined): Promise<void> {
+        if (ciphertext !== undefined && (!/^[A-Za-z0-9+/]+={0,2}$/.test(ciphertext) || ciphertext.length > 16384)) throw new Error("Invalid protected credential.");
+        const db = await this.connect();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("vault", "readwrite"); const store = tx.objectStore("vault");
+            if (ciphertext === undefined) store.delete("sync"); else store.put(ciphertext, "sync");
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onabort = tx.onerror = () => { db.close(); reject(new Error("Unable to update sync settings.")); };
+        });
+    }
     async compareAndSet(expected: number, envelope: Envelope): Promise<number> {
         const db = await this.connect();
         return new Promise((resolve, reject) => {

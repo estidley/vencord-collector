@@ -18,7 +18,17 @@ Building this repository alone does not install the plugin. Follow [Vencord inst
 
 Always-on permission lasts until revoked. Messages are not retained forever: the default is seven days, with at most 5,000 records / 8 MiB in the vault. Continuous mode rolls out its oldest entries when full, preserving unrelated imports. Storage errors, queue overflow, or a vault filled by other permissions still stop capture with an error. There is no claim of lossless collection or an unlimited archive. See [security boundaries](docs/SECURITY.md) and [adversarial flow review](docs/FLOW-REVIEW.md).
 
-Only events delivered to this client can be captured. Unsubscribed channels and offline periods can have gaps, even with account-wide capture. A separate review-and-confirm button can save the selected conversation's already-loaded messages. Opt-in scheduled-event, presence and voice observations are also available. No automatic historical extraction, attachment downloads, search service, notification delivery, or automatic MCP upload is implemented. See [data collection and history limits](docs/DISCORD-DATA.md).
+Only events delivered to this client can be captured. Unsubscribed channels and offline periods can have gaps, even with account-wide capture. A separate review-and-confirm button can save the selected conversation's already-loaded messages. Opt-in scheduled-event, presence and voice observations are also available. Optional **receiver sync** sends what always-on collects to your own `personal-coordination-mcp` on `127.0.0.1` (see below). No automatic historical extraction, attachment downloads, notification delivery, or delivery to any other host is implemented. See [data collection and history limits](docs/DISCORD-DATA.md).
+
+## Sync to personal-coordination-mcp (optional)
+
+This makes Discord searchable by your own agents the way an Outlook or Gmail MCP makes mail searchable: the collector keeps your local receiver's mailbox current, and agents read it on demand through the receiver's **read-only** MCP tools. Synced messages are data, never commands; nothing in the pipeline acts on message text.
+
+1. In `personal-coordination-mcp`, issue an `ingest`+`checkpoint` credential (for example `collector-home`) using its `examples/collector-sync-policy.json`, and start the receiver (default `127.0.0.1:4320`).
+2. In the plugin's always-on setup, tick **Also sync everything collected to my personal-coordination-mcp receiver**, keep or change the importer ID and port, and paste that credential's token. Setup checks the token with the receiver before anything is armed.
+3. New captures, edits and deletes arrive within seconds while Discord is open. The settings panel shows pending/delivered counts and the last sync; **Sync now** forces a pass.
+
+Sync uses its own export-enabled account-wide permission, so an existing always-on setup must be stopped and accepted again with sync ticked. Records collected under the old local-only permission are not migrated. Stopping collection removes the sync settings; it does not delete what the receiver already holds — revoke the grant there with its owner credential. Only `127.0.0.1` is ever contacted. See [CONNECTOR.md](docs/CONNECTOR.md#receiver-sync) for the delivery rules and failure handling.
 
 ## Events, presence and loaded messages
 
@@ -58,7 +68,8 @@ The fixture at [examples/manual-conversation.json](examples/manual-conversation.
 | Buffer | Whole-document AES-256-GCM, PBKDF2-SHA256, 600,000 iterations, fresh salt/IV, memory-only non-extractable keys, atomic IndexedDB updates |
 | Bounds | 2 MiB / 1,000 messages per selected file or cached selection; 5,000 message records and 2,000 activity observations; 8 MiB decrypted vault; 100 permission records; 500 recent audit records; pending live queue capped at 1,000 events / 2 MiB of serialized event text |
 | Lifecycle | Always-on resumes the accepted account after restart using Windows-protected credentials; Stop removes auto-start; optional timed sessions and file-mode idle locking remain |
-| Connector | Versioned encrypted handoff, reference decoder, per-event retry identifiers, recipient/scope/expiry checks; no network delivery |
+| Connector | Versioned encrypted handoff, reference decoder, per-event retry identifiers, recipient/scope/expiry checks; manual file or opt-in loopback sync |
+| Receiver sync | Opt-in at always-on setup; own export-enabled account grant; token + generated transfer key OS-protected and used only by the native helper; records marked delivered only on a committed receipt; edits/deletes re-sent; backoff; refused events isolated and set aside; full buffer drops delivered records first |
 | Audit | Encrypted bounded permission/import/live-start/create/update/delete/export/revoke/prune records; counts and permission IDs, no message text |
 
 ## Repository map

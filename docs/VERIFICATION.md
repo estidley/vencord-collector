@@ -2,6 +2,13 @@
 
 Live-plus-import implementation verified 2026-10-19 in the separate `vencord-collector` Git repository. Pulse code was not opened for editing, imported, or changed. Verification used synthetic messages and a synthetic browser host, with no Discord session or client injection.
 
+## Receiver sync (2026-10-21, Linux container, Node v24.22.0)
+
+- `npm run check`: **66 tests pass** (57 existing, 8 in `tests/sync.test.ts`, 1 native sync test). `npm run test:browser`: **10 pass** (9 existing + `sync.spec.ts`). Generated protocol schemas are unchanged.
+- End to end with the real native module (only Electron `safeStorage` faked) and a real `personal-coordination-mcp` on `127.0.0.1:4320`: a wrong port and a wrong token both failed setup; the stored sync record did not contain the token; four synthetic messages across a DM and a server channel were delivered in about 0.2 s; an edit and a delete followed in about 0.1 s. An MCP client then saw both conversations, the edited text, no deleted message, and results marked untrusted.
+- `npm run check:vencord` passes against Vendicated/Vencord `b0e636d`, and a full Vencord `pnpm build` with `dist/messageCollector` as a userplugin succeeds: the sync UI is in the renderer bundle and `protectSync`/`probeSync`/`deliver` are registered as native helpers in the main bundle. (The container could not fetch Vencord's `gifenc` git dependency, so it was stubbed locally for the build only.)
+- Not verified: running inside a real Discord install, Electron's own `fetch`/WebCrypto in Discord's main process, and Windows DPAPI.
+
 ## Results
 
 | Check | Result |

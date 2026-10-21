@@ -2,6 +2,7 @@ import type * as ReactTypes from "react";
 import { Collector } from "../core/collector";
 import type { LiveCapture } from "../core/live";
 import type { AlwaysOn } from "../core/always-on";
+import type { SyncController } from "../core/sync";
 import { grantExpiry, MAX_INPUT_BYTES, parseJson } from "../core/schema";
 import { createCaptureExtras } from "./CaptureExtras";
 
@@ -18,7 +19,7 @@ export function exampleGrant() {
 }
 
 // React is supplied by the host. The Vencord bundle uses Discord's React; the offline app uses its own.
-export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "useState" | "useRef" | "useEffect">, collector: Collector, live?: LiveCapture, always?: AlwaysOn) {
+export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "useState" | "useRef" | "useEffect">, collector: Collector, live?: LiveCapture, always?: AlwaysOn, sync?: SyncController) {
     const Extras = live ? createCaptureExtras(React, collector, live) : undefined;
     return function Panel() {
         const [status, setStatus] = React.useState(collector.status());
@@ -30,6 +31,11 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
         const [continuous, setContinuous] = React.useState(false);
         const [autoStatus, setAutoStatus] = React.useState(always?.status());
         const autoPassword = React.useRef<HTMLInputElement>(null);
+        const [syncStatus, setSyncStatus] = React.useState(sync?.status());
+        const [syncOn, setSyncOn] = React.useState(false);
+        const [syncPrincipal, setSyncPrincipal] = React.useState("collector-home");
+        const [syncPort, setSyncPort] = React.useState("4320");
+        const syncToken = React.useRef<HTMLInputElement>(null);
         const [message, setMessage] = React.useState("Locked. Create or unlock your encrypted buffer.");
         const [busy, setBusy] = React.useState(false);
         const [draft, setDraft] = React.useState(() => JSON.stringify(exampleGrant(), null, 2));
@@ -66,12 +72,13 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
             });
             const unsubscribeLive = live?.subscribe(() => setLiveStatus(live.status()));
             const unsubscribeAuto = always?.subscribe(() => setAutoStatus(always.status()));
+            const unsubscribeSync = sync?.subscribe(() => setSyncStatus(sync.status()));
             const hidden = () => { if (document.hidden && !live?.active) collector.lock(); };
             const lock = () => collector.lock();
             document.addEventListener("visibilitychange", hidden);
             window.addEventListener("pagehide", lock);
             return () => {
-                mounted.current = false; unsubscribe(); unsubscribeLive?.(); unsubscribeAuto?.(); clearTimeout(timer.current); if (!live?.active) collector.lock();
+                mounted.current = false; unsubscribe(); unsubscribeLive?.(); unsubscribeAuto?.(); unsubscribeSync?.(); clearTimeout(timer.current); if (!live?.active) collector.lock();
                 document.removeEventListener("visibilitychange", hidden); window.removeEventListener("pagehide", lock);
             };
         }, []);
@@ -90,21 +97,40 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
             {liveStatus && <p aria-live="polite">{liveStatus.active ? `Live: ${liveStatus.allConversations ? "ALL conversations on this account" : `${liveStatus.grantIds.length} conversation(s)`}, ${liveStatus.saved} changes saved. ${liveStatus.continuous ? "Continuous — no session time limit." : `Ends ${new Date(liveStatus.endsAt!).toLocaleTimeString()}.`}` : liveStatus.notice}</p>}
             {always && <div><p aria-live="polite">{autoStatus?.busy ? "Preparing automatic collection…" : autoStatus?.enabled && !liveStatus?.active ? "Automatic collection is paused. Review the capture status above before restarting it." : autoStatus?.notice}</p>
                 {(autoStatus?.busy || autoStatus?.enabled || liveStatus?.active || autoStatus?.notice !== "Always-on collection is off.") && <button onClick={() => void run(async () => { await always.disable(); return "Collection stopped. It will stay off after restarting Discord."; })}>Stop collecting and forget password</button>}</div>}
+            {sync && syncStatus?.configured && <div><p aria-live="polite" data-testid="sync-status">Receiver sync: {syncStatus.message} {syncStatus.pending} pending · {syncStatus.delivered} delivered{syncStatus.refused ? ` · ${syncStatus.refused} set aside` : ""}{syncStatus.lastDeliveredAt ? ` · last ${new Date(syncStatus.lastDeliveredAt).toLocaleTimeString()}` : ""}</p>
+                <button disabled={syncStatus.state === "syncing"} onClick={() => { void sync.syncNow().then(() => setSyncStatus(sync.status())); }}>Sync now</button></div>}
             <p role="status" aria-live="polite">{message}</p>
             {!collector.available && <p>Enable this plugin to use the local import panel.</p>}
             {!status.unlocked ? <form onSubmit={e => {
                 e.preventDefault(); const value = password.current?.value ?? "";
                 if (password.current) password.current.value = "";
+                const setup = always && sync && syncOn ? { principalId: syncPrincipal.trim(), port: Number(syncPort), token: (syncToken.current?.value ?? "").trim() } : undefined;
+                if (syncToken.current) syncToken.current.value = "";
                 void run(async () => {
                     await collector.unlock(value);
-                    if (always) { await always.enable(value, true, true); return "Collecting automatically. You can close this panel; collection resumes when Discord reopens."; }
+                    if (always) {
+                        await always.enable(value, true, true, setup);
+                        return setup ? "Collecting automatically and syncing to your receiver. You can close this panel." : "Collecting automatically. You can close this panel; collection resumes when Discord reopens.";
+                    }
                     return "Unlocked. No conversations are captured automatically.";
                 });
             }}>
                 <label style={field}>Buffer passphrase (at least 16 characters)
                     <input ref={password} type="password" minLength={16} maxLength={1024} autoComplete="off" required style={control} />
                 </label>
-                {always && <p>By accepting, you confirm authority and any required participant permission for all conversations delivered to this account, and accept the client-modification and privacy risks. Windows protects a remembered copy of this password for automatic unlocking. Collection continues until you stop it. Nothing is uploaded. Retains up to seven days / 5,000 records / 8 MiB, replacing the oldest continuous records when full.</p>}
+                {always && <p>By accepting, you confirm authority and any required participant permission for all conversations delivered to this account, and accept the client-modification and privacy risks. Windows protects a remembered copy of this password for automatic unlocking. Collection continues until you stop it. {syncOn ? "Records are also sent, encrypted, to your personal-coordination-mcp receiver on this computer (127.0.0.1) and become searchable by the agents you authorize there. Nothing goes to any other host." : "Nothing is uploaded."} Retains up to seven days / 5,000 records / 8 MiB, replacing the oldest continuous records when full.</p>}
+                {always && sync && <fieldset style={{ margin: "12px 0" }}><legend>Receiver sync (optional)</legend>
+                    <label><input type="checkbox" checked={syncOn} onChange={e => setSyncOn(e.currentTarget.checked)} /> Also sync everything collected to my personal-coordination-mcp receiver</label>
+                    {syncOn && <>
+                        <label style={field}>Importer ID (receiver credential ID)
+                            <input value={syncPrincipal} onChange={e => setSyncPrincipal(e.currentTarget.value)} pattern="[a-zA-Z0-9._\-]{1,100}" required style={control} /></label>
+                        <label style={field}>Receiver port on 127.0.0.1
+                            <input value={syncPort} onChange={e => setSyncPort(e.currentTarget.value)} inputMode="numeric" pattern="[0-9]{4,5}" required style={control} /></label>
+                        <label style={field}>Importer token (contents of that ID's .secret file)
+                            <input ref={syncToken} type="password" autoComplete="off" minLength={43} maxLength={43} required style={control} /></label>
+                        <p>The token is handed to Windows-protected storage and never shown again. A separate transfer key is generated for you. The receiver must be running: setup checks the token first.</p>
+                    </>}
+                </fieldset>}
                 <button disabled={busy || autoStatus?.busy || !collector.available}>{always ? "Accept at my own risk and start collecting" : "Create or unlock buffer"}</button>
                 {always && <details><summary>Advanced: unlock without collecting</summary><button type="button" disabled={busy || autoStatus?.busy || !collector.available} onClick={() => {
                     const value = password.current?.value ?? ""; if (password.current) password.current.value = "";

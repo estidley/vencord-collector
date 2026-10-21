@@ -11,7 +11,7 @@ Upstream: [Vendicated/Vencord](https://github.com/Vendicated/Vencord/tree/32c906
 - Cached `ChannelStore`, `GuildStore`, `SelectedChannelStore`, and `UserStore` supply provenance and the current account. The selected channel's `MessageStore` cache is read only after an explicit review request. `GuildScheduledEventStore` and `PresenceStore` are sampled every five seconds for separately selected scopes; `VoiceStateStore` seeds known occupancy and `VOICE_STATE_UPDATES` supplies transitions. No history is requested and no credential store is accessed.
 - [`src/webpack/common/index.ts`](https://github.com/Vendicated/Vencord/blob/32c90633ce6a95d7e56c95479efbb431bacf1eac/src/webpack/common/index.ts): common exports include React. The plugin uses the host's React rather than bundling another renderer.
 - [Basic Plugin Setup](https://docs.vencord.dev/plugins/): custom plugins live in `src/userplugins/<camelCaseName>/index.ts(x)` and are built with Vencord; they are not independently installable extensions.
-- [Native code](https://docs.vencord.dev/plugins/native/): `native.ts` exposes only Windows credential protection/restore/availability through Electron safeStorage. It exposes no file paths, message access, or network bridge. Persistence remains in IndexedDB.
+- [Native code](https://docs.vencord.dev/plugins/native/): `native.ts` exposes Windows credential protection/restore/availability through Electron safeStorage and, for opt-in receiver sync, `protectSync`/`probeSync`/`deliver`, which contact only `127.0.0.1` on the configured port. It exposes no file paths or arbitrary-host network access. Persistence remains in IndexedDB.
 
 ## Build review
 
