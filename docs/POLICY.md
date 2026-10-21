@@ -32,5 +32,5 @@ A bot does not provide access to arbitrary conversations between the user's pers
 - No automated historical extraction, token access, collector-initiated Discord HTTP requests or separate Gateway connection. Explicit cached selections can contain older messages, but do not establish a complete archive. Live capture observes only events already delivered by the client; completeness is not guaranteed.
 - No general sanctioned Vencord plugin route established by this research.
 - No bot deployment, intent approval, participant-consent service, or live permission synchronizer.
-- No automatic MCP upload, search agent, SQL server, or authenticated downstream revocation service.
+- Opt-in receiver sync delivers only to `personal-coordination-mcp` on `127.0.0.1`; no other upload target. No authenticated downstream revocation from the collector.
 - No AI training, relationship profiling, attachment fetching, or hidden data collection.

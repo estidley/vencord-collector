@@ -1,6 +1,6 @@
 import { derive, digest, envelopeSchema, open, seal, type Envelope, type Secret } from "./crypto";
 import { parseImport } from "./importer";
-import { activityBatchSchema, batchSchema, grantDraftSchema, grantExpiry, liveObservationSchema, MAX_VAULT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
+import { activityBatchSchema, batchSchema, grantDraftSchema, grantExpiry, liveObservationSchema, MAX_VAULT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Batch, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
 import { activityObservationSchema, activityPermissionSchema, permitsActivity, type ActivityEvent } from "./activity-schema";
 import type { VaultStorage } from "./storage";
 
@@ -92,10 +92,13 @@ export class Collector {
         return grant;
     }
     status() {
-        if (!this.state) return { unlocked: false, count: 0, activityCount: 0, grants: [] as Grant[], audit: [] as State["audit"] };
+        const none = { pending: 0, delivered: 0, refused: 0 };
+        if (!this.state) return { unlocked: false, count: 0, activityCount: 0, grants: [] as Grant[], audit: [] as State["audit"], sync: none };
         const state = structuredClone(this.state);
         this.pruneState(state);
-        return { unlocked: true, count: state.records.length, activityCount: state.activities.length, grants: state.grants, audit: state.audit };
+        const exportable = new Set(state.grants.filter(g => g.allowExport).map(g => g.grantId)), sync = { ...none };
+        for (const r of state.records) if (exportable.has(r.event.grantId)) sync[r.sync?.outcome ?? "pending"]++;
+        return { unlocked: true, count: state.records.length, activityCount: state.activities.length, grants: state.grants, audit: state.audit, sync };
     }
     async grant(input: unknown, attested: boolean): Promise<Grant> {
         if (attested !== true) throw new Error("Confirm your authority and permission for this specific conversation first.");
@@ -220,13 +223,18 @@ export class Collector {
             this.audit(state, input.type === "snapshot" ? "loaded-snapshot" : `live-${input.type}`, grantId, 1);
             if (grant.continuous) {
                 // Only the explicitly continuous permission's oldest records roll out. Imports stay intact.
-                let count = 0;
+                // Records the receiver already holds go first, so a full buffer drops unsent data last.
+                let count = 0, unsent = 0;
                 while (state.records.length > 5000 || new TextEncoder().encode(JSON.stringify(state)).byteLength > MAX_VAULT_BYTES - 1024) {
-                    const index = state.records.findIndex(r => r.event.grantId === grantId && r.event.eventId !== event.eventId);
+                    const own = (r: State["records"][number]) => r.event.grantId === grantId && r.event.eventId !== event.eventId;
+                    let index = grant.allowExport ? state.records.findIndex(r => own(r) && r.sync) : -1;
+                    if (index < 0) index = state.records.findIndex(own);
                     if (index < 0) throw new Error("Other permissions fill the buffer. Free space before continuing.");
+                    if (grant.allowExport && !state.records[index]!.sync) unsent++;
                     state.records.splice(index, 1); count++;
                 }
                 if (count) this.audit(state, "capacity-prune", grantId, count);
+                if (unsent) this.audit(state, "sync-dropped", grantId, unsent);
             }
             if (state.records.length > 5000) throw new Error("Buffer capacity reached. Live capture must stop.");
             return true;
@@ -287,6 +295,40 @@ export class Collector {
             if (Date.parse(batch.expiresAt) <= this.clock()) throw new Error("Export expired. Retry after pruning.");
             this.audit(state, "activity-export", grantId, events.length);
             return encrypted;
+        });
+    }
+    /** Event IDs of this export-enabled grant's records the receiver has not acknowledged, oldest first. */
+    pendingSync(grantId: string): string[] {
+        this.check(this.epoch);
+        const grant = this.active(this.state!, grantId);
+        if (!grant.allowExport) return [];
+        return this.state!.records.filter(r => r.event.grantId === grantId && !r.sync && Date.parse(r.event.expiresAt) > this.clock())
+            .map(r => r.event.eventId);
+    }
+    /** Plain batch for the native delivery boundary. Same contract and checks as export(); not audited until delivered. */
+    syncBatch(grantId: string, eventIds: readonly string[]): Batch {
+        this.check(this.epoch);
+        const state = this.state!, grant = this.active(state, grantId);
+        if (!grant.allowExport) throw new Error("This permission allows local storage only.");
+        const wanted = new Set(eventIds);
+        const events = state.records.filter(r => r.event.grantId === grantId && wanted.has(r.event.eventId) && Date.parse(r.event.expiresAt) > this.clock()).map(r => r.event);
+        if (!events.length) throw new Error("No eligible records to synchronize.");
+        return parseSafe(batchSchema, {
+            protocol: "personal-coordination/ingest-file", version: 1, batchId: uid(), createdAt: this.now(),
+            expiresAt: new Date(Math.min(...events.map(e => Date.parse(e.expiresAt)))).toISOString(),
+            audience: "personal-coordination-mcp", principalId: grant.principalId, grant: structuredClone(grant), events: structuredClone(events)
+        });
+    }
+    /** Record a committed receipt (or a per-event refusal). Records replaced since the batch was built stay pending. */
+    async markSynced(grantId: string, eventIds: readonly string[], outcome: "delivered" | "refused"): Promise<number> {
+        const wanted = new Set(eventIds);
+        return this.mutate(state => {
+            let count = 0;
+            for (const r of state.records) if (r.event.grantId === grantId && wanted.has(r.event.eventId) && !r.sync) {
+                r.sync = { outcome, at: this.now() }; count++;
+            }
+            if (count) this.audit(state, outcome === "delivered" ? "sync-delivered" : "sync-refused", grantId, count);
+            return count;
         });
     }
     async verifyPassphrase(passphrase: string): Promise<void> {

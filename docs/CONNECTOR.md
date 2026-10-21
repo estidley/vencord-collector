@@ -1,6 +1,6 @@
 # personal-coordination-mcp connector v1
 
-Implemented transport: **explicit encrypted file handoff only**. No web server receives messages and no outgoing network connection is made. The future MCP service can consume this protocol without depending on Vencord or Pulse.
+Implemented transports: **explicit encrypted file handoff**, and opt-in **receiver sync** of the always-on permission to `personal-coordination-mcp` on `127.0.0.1` ([below](#receiver-sync)). No web server inside the collector receives messages, and no host other than loopback is ever contacted. Both use the same versioned batch; the receiver does not depend on Vencord or Pulse.
 
 ## Envelope and plaintext
 
@@ -52,3 +52,17 @@ Each record carries account/grant/event IDs, observation/expiry timestamps, clie
 Presence has `previousStatus: null` at baseline/after gaps. Never equate it to a login, and never alert on an initial baseline as if it were a transition. Voice has baseline/transition labels and nullable `previousChannelObservedSince` / `observedDurationSeconds`. Duration covers observed occupancy in the previous channel only, excludes no known gaps, and is a lower bound rather than an exact visit length. Reset baselines on disconnect, reload, changed scope and stalls; unseen transitions may still occur. No cross-device identity inference or private/invisible-status bypass is provided.
 
 The collector does not call MCP, issue notifications or execute AI tasks. A future rules service needs freshness checks, deduplication, rate limits, quiet hours, opt-outs and user-approved destinations/actions. Treat message and event descriptions as untrusted content, never system instructions.
+
+## Receiver sync
+
+Opt-in during always-on setup (Windows Desktop only). Implemented in `src/core/sync.ts` (scheduling, acknowledgement, failure handling) and `src/plugin/native.ts` (credential custody and delivery).
+
+- **Permission.** Setup creates a new continuous account-wide grant with `allowExport: true` and the receiver importer ID as `principalId`. The receiver must independently allow it: purpose `Personal conversation reference across all accessible conversations`, `allowAccountScope`, `allowContinuous`, source `vencord-live`.
+- **Credentials.** The user pastes the importer token once. The native helper generates a 256-bit transfer passphrase, protects both with Electron `safeStorage`, and stores only that ciphertext in IndexedDB. The renderer never receives either secret again. The native helper derives the transfer key once per configuration per session and seals each batch with a fresh IV.
+- **Delivery.** `POST http://127.0.0.1:<port>/v1/ingest` with the PROTOCOL.md wrapper, from the Electron main process (no browser Origin). The port is fixed at setup (1024–65535); redirects are refused; responses over 64 KiB are discarded. Native code rejects any batch whose grant, importer or account differs from the configured sync permission.
+- **Acknowledgement.** A record is marked `delivered` in the encrypted vault only after the receiver returns a committed receipt. Edits and deletes replace the record, so they are pending again and re-sent. Event IDs are preserved, so resends are deduplicated by the receiver.
+- **Scheduling.** A pass runs about 5 seconds after new captures, every 30 seconds otherwise, and immediately on **Sync now**. At most 500 events per batch and 20 requests per pass.
+- **Failures.** Network/429/5xx: records stay pending, exponential backoff 30 s → 15 min. 401: sync pauses with a token error. 400/403/409/413: the batch is split until refused events are isolated; they are marked `refused` (set aside, not retried) **only** if other events in the same pass were accepted. If nothing is accepted, the refusal is treated as permission-wide and sync pauses with backoff, discarding nothing.
+- **Capacity.** When the continuous buffer is full, delivered records roll out before unsent ones; unsent drops are audited as `sync-dropped`.
+- **Audit.** `sync-delivered`, `sync-refused`, `sync-dropped` with counts only.
+- **Limits.** Delivery only while Discord is open and always-on is running. Stopping collection removes the sync settings but does not revoke data the receiver holds; use its owner `revoke`. Events missed while Discord was closed are never seen. Activity (events/presence/voice) is not synced.

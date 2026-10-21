@@ -93,12 +93,16 @@ export type MessageEvent = z.infer<typeof eventSchema>;
 
 export const auditSchema = z.strictObject({
     auditId: z.uuid(), at: instant,
-    action: z.enum(["grant", "import", "export", "revoke", "prune", "capacity-prune", "live-start", "live-create", "live-update", "live-delete", "loaded-snapshot", "activity-permission", "activity-save", "activity-export"]),
+    action: z.enum(["grant", "import", "export", "revoke", "prune", "capacity-prune", "live-start", "live-create", "live-update", "live-delete", "loaded-snapshot", "activity-permission", "activity-save", "activity-export",
+        "sync-delivered", "sync-refused", "sync-dropped"]),
     grantId: z.uuid().nullable(), count: z.number().int().nonnegative()
 });
 export const stateSchema = z.strictObject({
     version: z.literal(1), grants: z.array(grantSchema).max(100),
-    records: z.array(z.strictObject({ digest: z.string().regex(/^[a-f0-9]{64}$/), event: eventSchema })).max(5000),
+    // `sync` is set only after the receiver's committed receipt (delivered) or after it refused this one
+    // event while accepting others (refused). Replacing a record (edit/delete) starts it pending again.
+    records: z.array(z.strictObject({ digest: z.string().regex(/^[a-f0-9]{64}$/), event: eventSchema,
+        sync: z.strictObject({ outcome: z.enum(["delivered", "refused"]), at: instant }).optional() })).max(5000),
     activities: z.array(activityEventSchema).max(2000).default([]),
     audit: z.array(auditSchema).max(500)
 });
