@@ -191,9 +191,11 @@ export class Collector {
             const senderId = input.type === "create" || input.type === "snapshot" ? input.senderId : previous?.senderId;
             if (!senderId || !permitsSender(grant, senderId)) return false;
             if (input.type === "update" && input.senderId && input.senderId !== senderId) throw new Error("Client event sender changed unexpectedly.");
+            const senderName = input.type === "delete" ? undefined : input.senderName ?? previous?.senderName;
             const base = { version: 1 as const, eventId: crypto.randomUUID(), messageId: input.messageId,
                 source: "vencord-live" as const, accountId, provenance,
                 provenanceEvidence: "client-observed" as const, grantId, observedAt: this.now(), senderId,
+                ...(senderName ? { senderName } : {}),
                 expiresAt: new Date(Math.min(previous ? Date.parse(previous.expiresAt) : Infinity,
                     grantExpiry(grant), this.clock() + grant.retentionDays * DAY)).toISOString() };
             let event: MessageEvent;

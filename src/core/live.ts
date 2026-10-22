@@ -130,7 +130,8 @@ export class LiveCapture {
         for (const raw of loaded) {
             const m = raw as Record<string, any>;
             if (!m || m.deleted === true || m.channel_id !== channelId || !permitsSender(grant, m.author?.id) || m.state === "SENDING" || m.state === "SEND_FAILED" || (Number(m.flags) & 64) !== 0) continue;
-            const event = liveObservationSchema.safeParse({ type: "snapshot", messageId: m.id, channelId, senderId: m.author?.id,
+            const senderName = userDisplayName(m.author);
+            const event = liveObservationSchema.safeParse({ type: "snapshot", messageId: m.id, channelId, senderId: m.author?.id, ...(senderName ? { senderName } : {}),
                 createdAt: clientTime(m.timestamp), editedAt: clientTime(m.editedTimestamp ?? m.edited_timestamp ?? null), content: m.content });
             if (!event.success) continue;
             bytes += new TextEncoder().encode(JSON.stringify(event.data)).byteLength;
@@ -183,11 +184,13 @@ export class LiveCapture {
                 if (!m || typeof m.author?.id !== "string" || !permitsSender(grant, m.author.id)) return;
                 // Ignore unsent/failed local echoes and ephemeral messages, even if optimistic is absent.
                 if (m.state === "SENDING" || m.state === "SEND_FAILED" || (Number(m.flags) & 64) !== 0) return;
-                events.push({ type: "create", channelId, messageId: m.id, senderId: m.author.id, createdAt: clientTime(m.timestamp), content: m.content });
+                const senderName = userDisplayName(m.author);
+                events.push({ type: "create", channelId, messageId: m.id, senderId: m.author.id, ...(senderName ? { senderName } : {}), createdAt: clientTime(m.timestamp), content: m.content });
             } else if (name === "MESSAGE_UPDATE") {
                 if (!m) return;
                 events.push({ type: "update", channelId, messageId: m.id,
                     ...(m.author?.id !== undefined ? { senderId: m.author.id } : {}),
+                    ...(userDisplayName(m.author) ? { senderName: userDisplayName(m.author) } : {}),
                     ...(m.content !== undefined ? { content: m.content } : {}),
                     ...(m.edited_timestamp !== undefined ? { editedAt: clientTime(m.edited_timestamp) } : {}) });
             } else {
@@ -225,14 +228,26 @@ export class LiveCapture {
 }
 
 /** Read only currently available channel metadata. No history/API requests or account credentials. */
-export function channelProvenance(channel: unknown, accountId: string, guildName: string | null = null): Provenance | undefined {
+/** The name Discord shows for a user: global display name, else username. Never invents one. */
+export function userDisplayName(user: unknown): string | undefined {
+    if (!user || typeof user !== "object") return undefined;
+    const u = user as Record<string, unknown>;
+    for (const v of [u.globalName, u.global_name, u.username]) if (typeof v === "string" && v.trim()) return v.trim().slice(0, 100);
+    return undefined;
+}
+export function channelProvenance(channel: unknown, accountId: string, guildName: string | null = null,
+    nameOf: (userId: string) => string | undefined = () => undefined): Provenance | undefined {
     if (!channel || typeof channel !== "object") return undefined;
     const c = channel as Record<string, any>;
     const kind = c.type === 1 ? "dm" : c.type === 3 ? "group-dm" : [10, 11, 12].includes(c.type) ? "guild-thread" : [0, 2, 5, 13].includes(c.type) ? "guild-channel" : undefined;
     if (!kind) return undefined;
     const dm = kind === "dm" || kind === "group-dm";
     const result = provenanceSchema.safeParse({ kind, guildId: dm ? null : c.guild_id ?? null, guildName: dm ? null : guildName,
-        channelId: c.id, channelName: typeof c.name === "string" && c.name ? c.name : null,
+        channelId: c.id,
+        // DMs have no channel name; label them the way Discord does, by the other people's names.
+        channelName: typeof c.name === "string" && c.name ? c.name.slice(0, 200)
+            : dm ? (Array.isArray(c.recipients) ? c.recipients : []).filter((r: unknown) => typeof r === "string" && r !== accountId)
+                .map((r: string) => nameOf(r)).filter(Boolean).join(", ").slice(0, 200) || null : null,
         parentChannelId: kind === "guild-thread" ? c.parent_id ?? null : null,
         threadId: kind === "guild-thread" ? c.id : null,
         participantIds: dm ? [...new Set([accountId, ...(Array.isArray(c.recipients) ? c.recipients : [])])].sort() : [] });

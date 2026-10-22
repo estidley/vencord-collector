@@ -3,7 +3,7 @@ import definePlugin from "@utils/types";
 import { ChannelStore, GuildStore, GuildScheduledEventStore, MessageStore, PresenceStore, VoiceStateStore, React, SelectedChannelStore, UserStore } from "@webpack/common";
 import { ActivityCapture } from "../core/activity";
 import { Collector } from "../core/collector";
-import { channelProvenance, LiveCapture } from "../core/live";
+import { channelProvenance, LiveCapture, userDisplayName } from "../core/live";
 import { IndexedDbStorage } from "../core/storage";
 import { AlwaysOn } from "../core/always-on";
 import type { AutoProtection } from "../core/auto-config";
@@ -23,7 +23,7 @@ const live = new LiveCapture(collector, {
         const channel = ChannelStore.getChannel(channelId);
         if (!accountId || !channel) return undefined;
         const guild = channel.guild_id ? GuildStore.getGuild(channel.guild_id) : undefined;
-        return channelProvenance(channel, accountId, guild?.name ?? null);
+        return channelProvenance(channel, accountId, guild?.name ?? null, id => userDisplayName(UserStore.getUser(id)));
     }
 });
 const currentAccount = () => UserStore?.getCurrentUser()?.id;

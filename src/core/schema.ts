@@ -6,6 +6,7 @@ export const MAX_VAULT_BYTES = 8 * 1024 * 1024;
 export const id = z.string().regex(/^[0-9]{1,20}$/);
 export const instant = z.iso.datetime({ offset: true });
 export const source = z.enum(["manual", "discord-data-package", "vencord-live"]);
+export const displayName = z.string().trim().min(1).max(100);
 
 export const provenanceSchema = z.strictObject({
     kind: z.enum(["guild-channel", "guild-thread", "dm", "group-dm", "unknown"]),
@@ -77,7 +78,9 @@ const baseEvent = {
     accountId: id, provenance: provenanceSchema,
     provenanceEvidence: z.enum(["user-supplied", "client-observed", "authorized-source"]),
     grantId: z.uuid(), observedAt: instant, expiresAt: instant,
-    sourceTimestamp: instant.nullable(), senderId: id.nullable()
+    sourceTimestamp: instant.nullable(), senderId: id.nullable(),
+    // Display name the client showed for the sender when observed. Optional: older exports and files omit it.
+    senderName: displayName.optional()
 };
 export const eventSchema = z.discriminatedUnion("type", [
     z.strictObject({ ...baseEvent, type: z.literal("message.snapshot"),
@@ -122,11 +125,11 @@ export const activityBatchSchema = z.strictObject({
 });
 
 export const liveObservationSchema = z.discriminatedUnion("type", [
-    z.strictObject({ type: z.literal("snapshot"), messageId: id, channelId: id, senderId: id,
+    z.strictObject({ type: z.literal("snapshot"), messageId: id, channelId: id, senderId: id, senderName: displayName.optional(),
         createdAt: instant, editedAt: instant.nullable(), content: z.string().max(20_000) }),
-    z.strictObject({ type: z.literal("create"), messageId: id, channelId: id, senderId: id,
+    z.strictObject({ type: z.literal("create"), messageId: id, channelId: id, senderId: id, senderName: displayName.optional(),
         createdAt: instant, content: z.string().max(20_000) }),
-    z.strictObject({ type: z.literal("update"), messageId: id, channelId: id, senderId: id.optional(),
+    z.strictObject({ type: z.literal("update"), messageId: id, channelId: id, senderId: id.optional(), senderName: displayName.optional(),
         content: z.string().max(20_000).optional(), editedAt: instant.nullable().optional() }),
     z.strictObject({ type: z.literal("delete"), messageId: id, channelId: id })
 ]);
