@@ -462,6 +462,11 @@
                 "type": "string",
                 "pattern": "^[0-9]{1,20}$"
               },
+              "senderName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
               "type": {
                 "type": "string",
                 "const": "message.snapshot"
@@ -666,6 +671,11 @@
               "senderId": {
                 "type": "string",
                 "pattern": "^[0-9]{1,20}$"
+              },
+              "senderName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
               },
               "type": {
                 "type": "string",
@@ -872,6 +882,11 @@
                     "type": "null"
                   }
                 ]
+              },
+              "senderName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
               },
               "type": {
                 "type": "string",
@@ -1083,6 +1098,11 @@
                     "type": "null"
                   }
                 ]
+              },
+              "senderName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
               },
               "type": {
                 "type": "string",
