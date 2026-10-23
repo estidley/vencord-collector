@@ -1,6 +1,7 @@
+import { detailKeys, filterDetails } from "./details";
 import { derive, digest, envelopeSchema, open, seal, type Envelope, type Secret } from "./crypto";
 import { parseImport } from "./importer";
-import { activityBatchSchema, batchSchema, grantDraftSchema, grantExpiry, liveObservationSchema, MAX_VAULT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Batch, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
+import { activityBatchSchema, batchSchema, grantDraftSchema, grantExpiry, liveObservationSchema, MAX_VAULT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, stateSchema, type Grant, type MessageEvent, type Provenance, type State } from "./schema";
 import { activityObservationSchema, activityPermissionSchema, permitsActivity, type ActivityEvent } from "./activity-schema";
 import type { VaultStorage } from "./storage";
 
@@ -80,9 +81,9 @@ export class Collector {
         return this.exclusive(async () => {
             this.check(epoch);
             const state = structuredClone(this.state!);
-            this.pruneState(state);
+            const pruned = this.pruneState(state);
             const result = await fn(state, epoch);
-            await this.save(state, epoch);
+            if (result !== false || pruned) await this.save(state, epoch);
             return result;
         });
     }
@@ -91,6 +92,12 @@ export class Collector {
         if (!grant || grant.revokedAt || grantExpiry(grant) <= this.clock()) throw new Error("Permission is missing, expired, or revoked.");
         return grant;
     }
+    people() {
+        if (!this.state) return [];
+        const people = new Map<string, string>();
+        for (const r of this.state.records) if (r.event.senderId) people.set(r.event.senderId, r.event.senderName ?? r.event.senderId);
+        return [...people].slice(0, 500).map(([id, name]) => ({ id, name }));
+    }
     status() {
         const none = { pending: 0, delivered: 0, refused: 0 };
         if (!this.state) return { unlocked: false, count: 0, activityCount: 0, grants: [] as Grant[], audit: [] as State["audit"], sync: none };
@@ -98,6 +105,7 @@ export class Collector {
         this.pruneState(state);
         const exportable = new Set(state.grants.filter(g => g.allowExport).map(g => g.grantId)), sync = { ...none };
         for (const r of state.records) if (exportable.has(r.event.grantId)) sync[r.sync?.outcome ?? "pending"]++;
+        for (const e of state.activities) if (state.grants.some(g => g.grantId === e.grantId && g.allowExport && g.activity.allowExport)) sync[e.sync?.outcome ?? "pending"]++;
         return { unlocked: true, count: state.records.length, activityCount: state.activities.length, grants: state.grants, audit: state.audit, sync };
     }
     async grant(input: unknown, attested: boolean): Promise<Grant> {
@@ -196,6 +204,7 @@ export class Collector {
                 source: "vencord-live" as const, accountId, provenance,
                 provenanceEvidence: "client-observed" as const, grantId, observedAt: this.now(), senderId,
                 ...(senderName ? { senderName } : {}),
+                ...(input.type !== "delete" ? { metadata: filterDetails({ ...previous?.metadata, ...input.metadata }, grant.details) } : {}),
                 expiresAt: new Date(Math.min(previous ? Date.parse(previous.expiresAt) : Infinity,
                     grantExpiry(grant), this.clock() + grant.retentionDays * DAY)).toISOString() };
             let event: MessageEvent;
@@ -206,11 +215,11 @@ export class Collector {
                 if (previous) return false;
                 event = { ...base, type: "message.create", sourceTimestamp: input.createdAt, createdAt: input.createdAt, content: input.content };
             } else if (input.type === "update") {
-                if (input.content === undefined && input.editedAt === undefined) return false;
+                if (input.content === undefined && input.editedAt === undefined && !input.metadata) return false;
                 const oldContent = previous!.type === "message.update" ? previous!.patch.content : "content" in previous! ? previous!.content : undefined;
                 const oldEdited = previous!.type === "message.update" ? previous!.patch.editedAt : undefined;
-                if ((input.content === undefined || input.content === oldContent) && (input.editedAt === undefined || input.editedAt === oldEdited)) return false;
-                event = { ...base, type: "message.update", sourceTimestamp: input.editedAt ?? null,
+                if (JSON.stringify(base.metadata) === JSON.stringify(previous?.metadata) && (input.content === undefined || input.content === oldContent) && (input.editedAt === undefined || input.editedAt === oldEdited)) return false;
+                event = { ...base, type: "message.update", sourceTimestamp: input.editedAt ?? (input.content !== undefined ? null : previous!.sourceTimestamp),
                     patch: { ...(oldContent !== undefined && oldContent !== null ? { content: oldContent } : {}),
                         ...(oldEdited !== undefined ? { editedAt: oldEdited } : {}),
                         ...(input.content !== undefined ? { content: input.content } : {}),
@@ -242,6 +251,15 @@ export class Collector {
             return true;
         });
     }
+    async configureDetails(grantId: string, keys: readonly string[], confirmed: boolean) {
+        if (!confirmed || keys.some(k => !detailKeys.includes(k as typeof detailKeys[number]))) throw new Error("Confirm valid message detail choices.");
+        return this.mutate(state => {
+            const grant = this.active(state, grantId);
+            grant.details = [...new Set(keys)] as typeof grant.details;
+            for (const r of state.records) if (r.event.grantId === grantId) r.event.metadata = filterDetails(r.event.metadata, grant.details);
+            this.audit(state, "activity-permission", grantId, 0);
+        });
+    }
     async configureActivity(grantId: string, input: unknown, confirmed: boolean) {
         if (confirmed !== true) throw new Error("Confirm authority for the selected servers and people first.");
         const permission = parseSafe(activityPermissionSchema, input);
@@ -260,25 +278,22 @@ export class Collector {
             const grant = this.active(state, grantId);
             if (grant.source !== "vencord-live" || grant.scope !== "account" || grant.accountId !== accountId || !permitsActivity(grant.activity, observation))
                 throw new Error("Activity is outside its permission.");
-            // Schedule snapshots represent latest cached state, not a fabricated create/update/delete history.
-            if (observation.type === "scheduled-event.snapshot") {
-                const same = (e: ActivityEvent) => e.grantId === grantId && e.observation.type === "scheduled-event.snapshot" && e.observation.guildId === observation.guildId && e.observation.scheduledEventId === observation.scheduledEventId;
-                const previous = state.activities.find(same);
-                if (previous && JSON.stringify(previous.observation) === JSON.stringify(observation)) return false;
-                state.activities = state.activities.filter(e => !same(e));
-            }
             const event: ActivityEvent = { version: 1, eventId: uid(), grantId, accountId,
                 source: "vencord-live", provenanceEvidence: "client-observed", observedAt: this.now(),
                 expiresAt: new Date(Math.min(grantExpiry(grant), this.clock() + grant.retentionDays * DAY)).toISOString(), observation };
             state.activities.push(event);
             this.audit(state, "activity-save", grantId, 1);
-            let removed = 0;
+            let removed = 0, unsent = 0;
             while (state.activities.length > 2000 || new TextEncoder().encode(JSON.stringify(state)).byteLength > MAX_VAULT_BYTES - 1024) {
-                const index = state.activities.findIndex(e => e.grantId === grantId && e.eventId !== event.eventId);
+                const own = (e: State["activities"][number]) => e.grantId === grantId && e.eventId !== event.eventId;
+                let index = state.activities.findIndex(e => own(e) && e.sync);
+                if (index < 0) index = state.activities.findIndex(own);
                 if (index < 0) throw new Error("Buffer is full. Free space before collecting activity.");
+                if (grant.activity.allowExport && !state.activities[index]!.sync) unsent++;
                 state.activities.splice(index, 1); removed++;
             }
             if (removed) this.audit(state, "capacity-prune", grantId, removed);
+            if (unsent) this.audit(state, "sync-dropped", grantId, unsent);
             return true;
         });
     }
@@ -287,7 +302,7 @@ export class Collector {
         return this.mutate(async state => {
             const grant = this.active(state, grantId);
             if (!grant.activity.allowExport) throw new Error("Activity export is disabled.");
-            const events = state.activities.filter(e => e.grantId === grantId && permitsActivity(grant.activity, e.observation));
+            const events = state.activities.filter(e => e.grantId === grantId && permitsActivity(grant.activity, e.observation)).map(({sync: _sync, ...e}) => e);
             if (!events.length) throw new Error("No eligible activities to export.");
             const batch = parseSafe(activityBatchSchema, { protocol: "personal-coordination/activity-file", version: 1,
                 batchId: uid(), createdAt: this.now(), expiresAt: new Date(Math.min(...events.map(e => Date.parse(e.expiresAt)))).toISOString(),
@@ -304,17 +319,23 @@ export class Collector {
         this.check(this.epoch);
         const grant = this.active(this.state!, grantId);
         if (!grant.allowExport) return [];
-        return this.state!.records.filter(r => r.event.grantId === grantId && !r.sync && Date.parse(r.event.expiresAt) > this.clock())
-            .map(r => r.event.eventId);
+        const messages = this.state!.records.filter(r => r.event.grantId === grantId && !r.sync && Date.parse(r.event.expiresAt) > this.clock()).map(r => r.event.eventId);
+        const activities = grant.activity.allowExport ? this.state!.activities.filter(e => e.grantId === grantId && !e.sync && Date.parse(e.expiresAt) > this.clock()).map(e => e.eventId) : [];
+        return [...messages, ...activities];
     }
     /** Plain batch for the native delivery boundary. Same contract and checks as export(); not audited until delivered. */
-    syncBatch(grantId: string, eventIds: readonly string[]): Batch {
+    syncBatch(grantId: string, eventIds: readonly string[]) {
         this.check(this.epoch);
         const state = this.state!, grant = this.active(state, grantId);
         if (!grant.allowExport) throw new Error("This permission allows local storage only.");
         const wanted = new Set(eventIds);
         const events = state.records.filter(r => r.event.grantId === grantId && wanted.has(r.event.eventId) && Date.parse(r.event.expiresAt) > this.clock()).map(r => r.event);
-        if (!events.length) throw new Error("No eligible records to synchronize.");
+        if (!events.length) {
+            if (!grant.activity.allowExport) throw new Error("Activity export is disabled.");
+            const activities = state.activities.filter(e => e.grantId === grantId && wanted.has(e.eventId) && Date.parse(e.expiresAt) > this.clock()).map(({sync: _sync, ...e}) => e);
+            return parseSafe(activityBatchSchema, { protocol: "personal-coordination/activity-file", version: 1, batchId: uid(), createdAt: this.now(),
+                expiresAt: new Date(Math.min(...activities.map(e => Date.parse(e.expiresAt)))).toISOString(), audience: "personal-coordination-mcp", principalId: grant.principalId, grant: structuredClone(grant), events: activities });
+        }
         return parseSafe(batchSchema, {
             protocol: "personal-coordination/ingest-file", version: 1, batchId: uid(), createdAt: this.now(),
             expiresAt: new Date(Math.min(...events.map(e => Date.parse(e.expiresAt)))).toISOString(),
@@ -329,6 +350,7 @@ export class Collector {
             for (const r of state.records) if (r.event.grantId === grantId && wanted.has(r.event.eventId) && !r.sync) {
                 r.sync = { outcome, at: this.now() }; count++;
             }
+            for (const e of state.activities) if (e.grantId === grantId && wanted.has(e.eventId) && !e.sync) { e.sync = { outcome, at: this.now() }; count++; }
             if (count) this.audit(state, outcome === "delivered" ? "sync-delivered" : "sync-refused", grantId, count);
             return count;
         });

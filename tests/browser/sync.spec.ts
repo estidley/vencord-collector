@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 test("optional receiver sync: token checked at setup, never stored readable, status shown, stop removes it", async ({ page }) => {
     const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
-    await page.goto("http://127.0.0.1:4319/?always=1&sync=1");
+    await page.goto(`http://127.0.0.1:${process.env.COLLECTOR_HOST_TEST_PORT ?? "4319"}/?always=1&sync=1`);
     await page.getByLabel("Buffer passphrase", { exact: false }).fill("synthetic browser sync passphrase");
     await expect(page.getByText("Nothing is uploaded.")).toBeVisible();
     await page.getByLabel("Also sync everything collected").check();

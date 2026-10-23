@@ -1,5 +1,7 @@
 # personal-coordination-mcp connector v1
 
+**2026-10-22 update:** [People-first capture and read-only MCP integration](EXPANDED-CAPTURE.md) adds personal nickname preference, scoped message details and activity sync. That guide supersedes older activity-local-only limitations below.
+
 Implemented transports: **explicit encrypted file handoff**, and opt-in **receiver sync** of the always-on permission to `personal-coordination-mcp` on `127.0.0.1` ([below](#receiver-sync)). No web server inside the collector receives messages, and no host other than loopback is ever contacted. Both use the same versioned batch; the receiver does not depend on Vencord or Pulse.
 
 ## Envelope and plaintext

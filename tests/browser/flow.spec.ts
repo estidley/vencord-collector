@@ -5,7 +5,7 @@ import { decodeBatch } from "../../src/core/connector";
 test("real browser: grant, preview text safely, import, reload, export, revoke", async ({ page }) => {
     const errors: string[] = []; const external: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    page.on("request", req => { if (!req.url().startsWith("http://127.0.0.1:4318")) external.push(req.url()); });
+    page.on("request", req => { if (!req.url().startsWith(`http://127.0.0.1:${process.env.COLLECTOR_TEST_PORT ?? "4318"}`)) external.push(req.url()); });
     await page.goto("/");
     await page.getByLabel("Buffer passphrase").fill("strong browser testing passphrase");
     await page.getByRole("button", { name: "Create or unlock buffer" }).click();

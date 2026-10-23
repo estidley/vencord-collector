@@ -22,6 +22,7 @@ const live = new LiveCapture(collector, {
 const activity = new ActivityCapture(collector, live, {
     accountId: () => account,
     scheduledEvents: guildId => [{ id: "400", guild_id: guildId, name: "Synthetic game night", scheduled_start_time: "2026-12-01T19:00:00Z", status: 1 }],
+    person: userId => ({ type: "person.snapshot", userId, personalNickname: "My friend", displayName: "<img src=x onerror=alert(1)>", username: "account_name" }),
     presence: () => "online", voice: () => undefined
 });
 // Fake OS protection for synthetic browser tests only. Production uses Windows DPAPI.
@@ -56,6 +57,7 @@ const fixture = {
             author: { id: account }, timestamp: new Date().toISOString(), content: "synthetic browser live text" } });
         await live.drained();
     },
+    choices: () => collector.status().grants.find(g => g.grantId === always?.grantId)?.activity,
     status: () => ({ ...live.status(), count: collector.status().count, unlocked: collector.unlocked }),
     switchAccount: async (value: string) => { account = value; always?.accountChanged(); await always?.restore(); },
     storedAuto: () => storage.readAuto(),

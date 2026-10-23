@@ -79,9 +79,10 @@ export class SyncController {
             const queue = [pending.slice(0, CHUNK)], refused: string[] = [];
             let budget = BUDGET, delivered = 0, lastRefusal = 0;
             while (queue.length && budget-- > 0) {
-                const ids = queue.shift()!;
+                let ids = queue.shift()!;
                 let batch;
                 try { batch = this.collector.syncBatch(grantId, ids); } catch { continue; } // replaced or expired meanwhile
+                ids = batch.events.map(e => e.eventId);
                 const result = await native.deliver(this.blob, account, batch);
                 if (result.ok) {
                     delivered += await this.collector.markSynced(grantId, batch.events.map(e => e.eventId), "delivered");

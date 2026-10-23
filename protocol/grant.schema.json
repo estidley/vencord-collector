@@ -2,6 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "details": {
+      "default": [],
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "replies",
+          "mentions",
+          "attachments",
+          "links",
+          "embeds",
+          "reactions",
+          "poll",
+          "pinned"
+        ]
+      }
+    },
     "source": {
       "type": "string",
       "enum": [
@@ -27,8 +45,19 @@
         "scheduledEvents": false,
         "presence": false,
         "voice": false,
+        "members": false,
+        "channelContext": false,
+        "unread": false,
+        "games": false,
         "guildIds": [],
         "userIds": [],
+        "channelIds": [],
+        "namePreference": [
+          "personalNickname",
+          "nickname",
+          "displayName",
+          "username"
+        ],
         "allowExport": false
       },
       "type": "object",
@@ -60,6 +89,51 @@
         },
         "allowExport": {
           "type": "boolean"
+        },
+        "members": {
+          "default": false,
+          "type": "boolean"
+        },
+        "channelContext": {
+          "default": false,
+          "type": "boolean"
+        },
+        "unread": {
+          "default": false,
+          "type": "boolean"
+        },
+        "games": {
+          "default": false,
+          "type": "boolean"
+        },
+        "channelIds": {
+          "default": [],
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$"
+          }
+        },
+        "namePreference": {
+          "default": [
+            "personalNickname",
+            "nickname",
+            "displayName",
+            "username"
+          ],
+          "minItems": 1,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "personalNickname",
+              "nickname",
+              "displayName",
+              "username"
+            ]
+          }
         }
       },
       "required": [
@@ -68,7 +142,13 @@
         "voice",
         "guildIds",
         "userIds",
-        "allowExport"
+        "allowExport",
+        "members",
+        "channelContext",
+        "unread",
+        "games",
+        "channelIds",
+        "namePreference"
       ],
       "additionalProperties": false
     },
@@ -215,6 +295,7 @@
     }
   },
   "required": [
+    "details",
     "source",
     "accountId",
     "scope",

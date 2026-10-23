@@ -1,3 +1,4 @@
+import { messageDetails } from "./details";
 import { Collector } from "./collector";
 import { grantExpiry, id, liveObservationSchema, MAX_INPUT_BYTES, parseSafe, permitsProvenance, permitsSender, provenanceSchema, type Grant, type LiveObservation, type Provenance } from "./schema";
 
@@ -5,6 +6,7 @@ export interface LiveHost {
     accountId(): string | undefined;
     selectedChannelId(): string | undefined;
     provenance(channelId: string): Provenance | undefined;
+    cachedMessage?(channelId: string, messageId: string): unknown;
     loadedMessages?(channelId: string): readonly unknown[];
 }
 type EventName = "MESSAGE_CREATE" | "MESSAGE_UPDATE" | "MESSAGE_DELETE" | "MESSAGE_DELETE_BULK";
@@ -33,7 +35,10 @@ export class LiveCapture {
             if (!collector.unlocked) { this.clear(); return; }
             if (this.grants.size) {
                 const valid = new Set(collector.status().grants.filter(g => !g.revokedAt && grantExpiry(g) > this.clock()).map(g => g.grantId));
-                for (const key of this.grants.keys()) if (!valid.has(key)) this.grants.delete(key);
+                for (const key of this.grants.keys()) {
+                    if (!valid.has(key)) this.grants.delete(key);
+                    else this.grants.set(key, collector.status().grants.find(g => g.grantId === key)!);
+                }
                 if (!this.grants.size) { this.stop("Live permissions expired or were revoked."); return; }
             }
             this.notify();
@@ -132,7 +137,7 @@ export class LiveCapture {
             if (!m || m.deleted === true || m.channel_id !== channelId || !permitsSender(grant, m.author?.id) || m.state === "SENDING" || m.state === "SEND_FAILED" || (Number(m.flags) & 64) !== 0) continue;
             const senderName = userDisplayName(m.author);
             const event = liveObservationSchema.safeParse({ type: "snapshot", messageId: m.id, channelId, senderId: m.author?.id, ...(senderName ? { senderName } : {}),
-                createdAt: clientTime(m.timestamp), editedAt: clientTime(m.editedTimestamp ?? m.edited_timestamp ?? null), content: m.content });
+                metadata: messageDetails(m, grant.details), createdAt: clientTime(m.timestamp), editedAt: clientTime(m.editedTimestamp ?? m.edited_timestamp ?? null), content: m.content });
             if (!event.success) continue;
             bytes += new TextEncoder().encode(JSON.stringify(event.data)).byteLength;
             if (bytes > MAX_INPUT_BYTES) throw new Error("Loaded text exceeds the 2 MiB selection limit.");
@@ -162,6 +167,36 @@ export class LiveCapture {
         if (!this.active) throw new Error("Capture stopped before the selection completed. Some snapshots may be missing.");
         return items.length;
     }
+    refreshDetails(payload: unknown) {
+        if (!this.active || !payload || typeof payload !== "object") return;
+        const p = payload as Record<string, unknown>;
+        const channelId = p.channelId ?? p.channel_id, messageId = p.messageId ?? p.message_id;
+        if (typeof channelId !== "string" || typeof messageId !== "string") return;
+        const generation = this.generation;
+        queueMicrotask(() => {
+            if (!this.active || generation !== this.generation) return;
+            const grant = [...this.grants.values()].find(g => g.scope === "account" || g.provenance?.channelId === channelId);
+            if (!grant?.details.length) return;
+            const m = this.host.cachedMessage?.(channelId, messageId) as Record<string, unknown> | undefined;
+            if (!m || m.deleted === true || (Number(m.flags) & 64) !== 0) return;
+            this.receive("MESSAGE_UPDATE", { message: { id: messageId, channel_id: channelId, __details: messageDetails(m, grant.details) } });
+        });
+    }
+    pollDetails() {
+        this.checkAccount();
+        if (!this.active || !this.host.loadedMessages) return;
+        const channelId = this.host.selectedChannelId();
+        if (!channelId) return;
+        const grant = [...this.grants.values()].find(g => g.scope === "account" || g.provenance?.channelId === channelId);
+        if (!grant?.details.length) return;
+        // Only update already-collected records; never backfill unseen messages automatically.
+        for (const raw of this.host.loadedMessages(channelId).slice(-100)) {
+            const m = raw as Record<string, unknown>;
+            if (!m || m.deleted === true || m.channel_id !== channelId || (Number(m.flags) & 64) !== 0) continue;
+            this.receive("MESSAGE_UPDATE", { message: { id: m.id, channel_id: channelId,
+                ...messageDetails(m, grant.details) && { __details: messageDetails(m, grant.details) } } });
+        }
+    }
     receive(name: EventName, payload: unknown) {
         this.checkAccount();
         if (!this.active) return;
@@ -185,10 +220,10 @@ export class LiveCapture {
                 // Ignore unsent/failed local echoes and ephemeral messages, even if optimistic is absent.
                 if (m.state === "SENDING" || m.state === "SEND_FAILED" || (Number(m.flags) & 64) !== 0) return;
                 const senderName = userDisplayName(m.author);
-                events.push({ type: "create", channelId, messageId: m.id, senderId: m.author.id, ...(senderName ? { senderName } : {}), createdAt: clientTime(m.timestamp), content: m.content });
+                events.push({ type: "create", channelId, messageId: m.id, senderId: m.author.id, ...(senderName ? { senderName } : {}), metadata: messageDetails(m, grant.details), createdAt: clientTime(m.timestamp), content: m.content });
             } else if (name === "MESSAGE_UPDATE") {
                 if (!m) return;
-                events.push({ type: "update", channelId, messageId: m.id,
+                events.push({ type: "update", channelId, messageId: m.id, metadata: m.__details ?? messageDetails(m, grant.details),
                     ...(m.author?.id !== undefined ? { senderId: m.author.id } : {}),
                     ...(userDisplayName(m.author) ? { senderName: userDisplayName(m.author) } : {}),
                     ...(m.content !== undefined ? { content: m.content } : {}),

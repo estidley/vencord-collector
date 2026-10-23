@@ -1,5 +1,7 @@
 # Vencord Collector compatibility artifact
 
+**2026-10-22 update:** [People-first capture and read-only MCP integration](EXPANDED-CAPTURE.md) adds personal nickname preference, scoped message details and activity sync. That guide supersedes older activity-local-only limitations below.
+
 The generated `messageCollector` folder is a custom userplugin for opt-in live capture and file imports. It is disabled by default. The first setup requires a password and explicit acceptance; subsequently accepted always-on capture resumes automatically for the same account. Running a modified Discord client violates Discord's Terms of Service; this is an unofficial, at-your-own-risk route. The standalone app offers file imports without a client modification. This repository does not automatically install or inject Vencord.
 
 ## Current APIs inspected

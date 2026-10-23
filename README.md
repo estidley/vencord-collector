@@ -1,5 +1,7 @@
 # Vencord Collector
 
+**2026-10-22 update:** [People-first capture and read-only MCP integration](docs/EXPANDED-CAPTURE.md) adds personal nickname preference, scoped message details and activity sync. That guide supersedes older activity-local-only limitations below.
+
 Initial implementation of the Discord-side component of a four-repository personal coordination system. This is a new, independent Git repository. It has no Pulse dependencies and does not modify either Pulse repository.
 
 **Live capture and imports:** always-on Vencord collection after one password and one acceptance, plus user-selected local conversation files. Both use permissions, encrypted buffering, and explicit encrypted file handoff to a future `personal-coordination-mcp` receiver. Selected conversations and timed sessions remain under Advanced. The standalone browser app supports file imports only.

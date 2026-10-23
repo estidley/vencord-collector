@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 test("explicit live session survives panel close/hidden/idle, accepts file imports, and locks at one hour", async ({ page }) => {
     const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
-    await page.clock.install(); await page.goto("http://127.0.0.1:4319");
+    await page.clock.install(); await page.goto(`http://127.0.0.1:${process.env.COLLECTOR_HOST_TEST_PORT ?? "4319"}`);
     await page.getByLabel("Buffer passphrase").fill("synthetic live browser passphrase");
     await page.getByRole("button", { name: "Create or unlock buffer" }).click();
     await expect(page.getByText("0 records buffered")).toBeVisible();
@@ -35,7 +35,7 @@ test("explicit live session survives panel close/hidden/idle, accepts file impor
 });
 
 test("closing a non-live Vencord panel drops its unlocked key", async ({ page }) => {
-    await page.goto("http://127.0.0.1:4319"); await page.getByLabel("Buffer passphrase").fill("synthetic live browser passphrase");
+    await page.goto(`http://127.0.0.1:${process.env.COLLECTOR_HOST_TEST_PORT ?? "4319"}`); await page.getByLabel("Buffer passphrase").fill("synthetic live browser passphrase");
     await page.getByRole("button", { name: "Create or unlock buffer" }).click();
     await expect(page.getByText("0 records buffered")).toBeVisible();
     await page.evaluate(() => { (window as any).__liveFixture.mount(false); });
@@ -44,7 +44,7 @@ test("closing a non-live Vencord panel drops its unlocked key", async ({ page })
 });
 
 test("all-conversations button requires authority and risk checks and does not restart after reload", async ({ page }) => {
-    await page.goto("http://127.0.0.1:4319"); await page.getByLabel("Buffer passphrase").fill("synthetic all browser passphrase");
+    await page.goto(`http://127.0.0.1:${process.env.COLLECTOR_HOST_TEST_PORT ?? "4319"}`); await page.getByLabel("Buffer passphrase").fill("synthetic all browser passphrase");
     await page.getByRole("button", { name: "Create or unlock buffer" }).click();
     await page.getByRole("button", { name: "Allow all conversations" }).click();
     const start = page.getByRole("button", { name: "Start all conversations for one hour" });

@@ -1,5 +1,7 @@
 # Security and lifecycle boundaries
 
+**2026-10-22 update:** [People-first capture and read-only MCP integration](EXPANDED-CAPTURE.md) adds personal nickname preference, scoped message details and activity sync. That guide supersedes older activity-local-only limitations below.
+
 ## Encryption at rest
 
 Message storage is an envelope containing the entire vault, plus a monotonically increasing storage revision. Explicit always-on setup additionally persists an OS-encrypted automatic-unlock record, described below. AES-256-GCM authenticates the encrypted message text, IDs, provenance, permissions and local audit. PBKDF2-SHA256 derives a non-extractable in-memory key using a random 16-byte salt and 600,000 iterations. Every save uses a fresh 12-byte IV. Algorithm/context/version/KDF parameters are authenticated, and unexpected parameters fail before decryption.

@@ -7,12 +7,19 @@ export interface ActivityHost {
     scheduledEvents(guildId: string): readonly unknown[] | undefined;
     presence(userId: string): unknown; // undefined means not observed, never presumed offline
     voice(guildId: string, userId: string): string | null | undefined;
+    person?(userId: string): unknown;
+    member?(guildId: string, userId: string): unknown;
+    channel?(channelId: string): unknown;
+    unread?(channelId: string): unknown;
+    games?(userId: string): unknown;
     guildForChannel?(channelId: string): string | undefined;
 }
 type Voice = { channel: string | null; since: number };
 export class ActivityCapture {
     private generation = 0;
     private signature = "";
+    private deletedSchedules = new Set<string>();
+    private extras = new Map<string, string>();
     private schedules = new Map<string, string>();
     private presences = new Map<string, string>();
     private voices = new Map<string, Voice>();
@@ -25,7 +32,7 @@ export class ActivityCapture {
         live.subscribe(() => { if (!live.active) this.reset(); });
     }
     reset() {
-        this.generation++; this.signature = ""; this.schedules.clear(); this.presences.clear(); this.voices.clear();
+        this.generation++; this.signature = ""; this.schedules.clear(); this.deletedSchedules.clear(); this.extras.clear(); this.presences.clear(); this.voices.clear();
         this.queue = []; this.bytes = 0; this.lastPoll = 0;
     }
     connection(connected: boolean) { this.reset(); this.connected = connected; }
@@ -47,6 +54,22 @@ export class ActivityCapture {
         this.lastPoll = this.clock();
         const p = grant.activity;
         try {
+            const observe = (key: string, raw: unknown) => {
+                const parsed = activityObservationSchema.safeParse(raw);
+                if (!parsed.success || !permitsActivity(p, parsed.data)) return;
+                const value = JSON.stringify(parsed.data);
+                if (this.extras.get(key) === value) return;
+                if (this.extras.size >= 1400 && !this.extras.has(key)) this.extras.delete(this.extras.keys().next().value!);
+                if (this.enqueue(grant.grantId, grant.accountId, parsed.data)) this.extras.set(key, value);
+            };
+            // Priority: identity context for selected people, never a member-list crawl.
+            if (p.members) for (const user of p.userIds) observe(`person:${user}`, this.host.person?.(user));
+            if (p.members) for (const guild of p.guildIds) for (const user of p.userIds) observe(`member:${guild}:${user}`, this.host.member?.(guild, user));
+            for (const channel of p.channelIds) {
+                if (p.channelContext) observe(`channel:${channel}`, this.host.channel?.(channel));
+                if (p.unread) observe(`unread:${channel}`, this.host.unread?.(channel));
+            }
+            if (p.games) for (const user of p.userIds) observe(`game:${user}`, this.host.games?.(user));
             if (p.scheduledEvents) {
                 let scanned = 0;
                 for (const guildId of p.guildIds) {
@@ -55,12 +78,12 @@ export class ActivityCapture {
                     for (const raw of events) {
                         if (++scanned > 1000) throw new Error("Too many cached events.");
                         const o = scheduledSnapshot(raw);
-                        if (!o || o.guildId !== guildId) continue;
+                        if (!o || o.guildId !== guildId || this.deletedSchedules.has(guildId + ":" + o.scheduledEventId)) continue;
                         const key = guildId + ":" + o.scheduledEventId, value = JSON.stringify(o);
                         if (this.schedules.get(key) === value) continue;
                         // Bound deduplication memory too; missing entries are not deletions.
                         if (this.schedules.size >= 1000 && !this.schedules.has(key)) this.schedules.delete(this.schedules.keys().next().value!);
-                        this.enqueue(grant.grantId, grant.accountId, o); this.schedules.set(key, value);
+                        if (this.enqueue(grant.grantId, grant.accountId, o)) this.schedules.set(key, value);
                     }
                 }
             }
@@ -82,6 +105,28 @@ export class ActivityCapture {
                     previousChannelId: null, observation: "baseline", previousChannelObservedSince: null, observedDurationSeconds: null });
             }
         } catch { this.live.stop("Activity cache could not be read safely. Capture stopped; review client compatibility."); }
+    }
+    scheduledEvent(payload: unknown, deleted = false) {
+        const grant = this.permission(); if (!grant?.activity.scheduledEvents || !payload || typeof payload !== "object") return;
+        const p = payload as Record<string, any>, raw = p.guildScheduledEvent ?? p.event ?? p;
+        const o = deleted ? { type: "scheduled-event.deleted", guildId: raw.guild_id ?? raw.guildId ?? p.guildId, scheduledEventId: raw.id ?? p.guildScheduledEventId } : scheduledSnapshot(raw);
+        const checked = activityObservationSchema.safeParse(o);
+        if (!checked.success || !permitsActivity(grant.activity, checked.data)) return;
+        const event = checked.data;
+        if (event.type !== "scheduled-event.deleted" && event.type !== "scheduled-event.snapshot") return;
+        const key = event.guildId + ":" + event.scheduledEventId;
+        if (event.type === "scheduled-event.snapshot") {
+            const value = JSON.stringify(event);
+            if (this.schedules.get(key) === value) return;
+            if (this.enqueue(grant.grantId, grant.accountId, event)) this.schedules.set(key, value);
+            return;
+        }
+        if (this.deletedSchedules.has(key)) return;
+        if (checked.data.type === "scheduled-event.deleted") {
+            if (this.deletedSchedules.size >= 1000) this.deletedSchedules.delete(this.deletedSchedules.values().next().value!);
+            this.deletedSchedules.add(checked.data.guildId + ":" + checked.data.scheduledEventId);
+        }
+        this.enqueue(grant.grantId, grant.accountId, checked.data);
     }
     voiceUpdates(payload: unknown) {
         const grant = this.permission();
@@ -112,9 +157,9 @@ export class ActivityCapture {
     private enqueue(grantId: string, accountId: string, raw: ActivityObservation) {
         const event = activityObservationSchema.parse(raw);
         const bytes = new TextEncoder().encode(JSON.stringify(event)).byteLength;
-        if (this.queue.length >= 250 || this.bytes + bytes > 512 * 1024) throw new Error("Activity queue is full.");
+        if (this.queue.length >= 250 || this.bytes + bytes > 512 * 1024) return false;
         this.queue.push({ grantId, accountId, event, generation: this.generation, bytes }); this.bytes += bytes;
-        void this.pump();
+        void this.pump(); return true;
     }
     private async pump() {
         if (this.pumping) return;

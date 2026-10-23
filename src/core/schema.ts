@@ -1,3 +1,4 @@
+import { detailsSchema, detailKeys } from "./details";
 import { z } from "zod";
 import { activityEventSchema, activityPermissionSchema, noActivity } from "./activity-schema";
 
@@ -35,6 +36,7 @@ export const manualInputSchema = z.strictObject({
 });
 
 export const grantDraftSchema = z.strictObject({
+    details: z.array(z.enum(detailKeys)).max(8).default([]),
     source, accountId: id, scope: z.enum(["conversation", "account"]).default("conversation"),
     activity: activityPermissionSchema.default(noActivity),
     provenance: provenanceSchema.nullable(),
@@ -45,7 +47,7 @@ export const grantDraftSchema = z.strictObject({
     allowExport: z.boolean(),
     principalId: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/)
 }).superRefine((g, c) => {
-    if ((g.activity.scheduledEvents || g.activity.presence || g.activity.voice) && (g.source !== "vencord-live" || g.scope !== "account"))
+    if ((g.activity.scheduledEvents || g.activity.presence || g.activity.voice || g.activity.members || g.activity.channelContext || g.activity.unread || g.activity.games) && (g.source !== "vencord-live" || g.scope !== "account"))
         c.addIssue({ code: "custom", message: "Activity requires an account-wide live permission." });
     if (g.continuous ? g.source !== "vencord-live" || g.expiresAt !== null : g.expiresAt === null)
         c.addIssue({ code: "custom", message: "Only continuous live permissions may have no expiry." });
@@ -80,7 +82,7 @@ const baseEvent = {
     grantId: z.uuid(), observedAt: instant, expiresAt: instant,
     sourceTimestamp: instant.nullable(), senderId: id.nullable(),
     // Display name the client showed for the sender when observed. Optional: older exports and files omit it.
-    senderName: displayName.optional()
+    senderName: displayName.optional(), metadata: detailsSchema.optional()
 };
 export const eventSchema = z.discriminatedUnion("type", [
     z.strictObject({ ...baseEvent, type: z.literal("message.snapshot"),
@@ -106,7 +108,7 @@ export const stateSchema = z.strictObject({
     // event while accepting others (refused). Replacing a record (edit/delete) starts it pending again.
     records: z.array(z.strictObject({ digest: z.string().regex(/^[a-f0-9]{64}$/), event: eventSchema,
         sync: z.strictObject({ outcome: z.enum(["delivered", "refused"]), at: instant }).optional() })).max(5000),
-    activities: z.array(activityEventSchema).max(2000).default([]),
+    activities: z.array(activityEventSchema.extend({ sync: z.strictObject({ outcome: z.enum(["delivered", "refused"]), at: instant }).optional() })).max(2000).default([]),
     audit: z.array(auditSchema).max(500)
 });
 export type State = z.infer<typeof stateSchema>;
@@ -125,11 +127,11 @@ export const activityBatchSchema = z.strictObject({
 });
 
 export const liveObservationSchema = z.discriminatedUnion("type", [
-    z.strictObject({ type: z.literal("snapshot"), messageId: id, channelId: id, senderId: id, senderName: displayName.optional(),
+    z.strictObject({ type: z.literal("snapshot"), messageId: id, channelId: id, senderId: id, senderName: displayName.optional(), metadata: detailsSchema.optional(),
         createdAt: instant, editedAt: instant.nullable(), content: z.string().max(20_000) }),
-    z.strictObject({ type: z.literal("create"), messageId: id, channelId: id, senderId: id, senderName: displayName.optional(),
+    z.strictObject({ type: z.literal("create"), messageId: id, channelId: id, senderId: id, senderName: displayName.optional(), metadata: detailsSchema.optional(),
         createdAt: instant, content: z.string().max(20_000) }),
-    z.strictObject({ type: z.literal("update"), messageId: id, channelId: id, senderId: id.optional(), senderName: displayName.optional(),
+    z.strictObject({ type: z.literal("update"), messageId: id, channelId: id, senderId: id.optional(), senderName: displayName.optional(), metadata: detailsSchema.optional(),
         content: z.string().max(20_000).optional(), editedAt: instant.nullable().optional() }),
     z.strictObject({ type: z.literal("delete"), messageId: id, channelId: id })
 ]);
@@ -152,3 +154,5 @@ export function parseSafe<T>(schema: z.ZodType<T>, input: unknown): T {
     if (!parsed.success) throw new Error("Invalid format or missing fields. See the documented examples.");
     return parsed.data;
 }
+
+export type ActivityBatch = z.infer<typeof activityBatchSchema>;

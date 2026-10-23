@@ -5,7 +5,7 @@ import { LiveCapture } from "../src/core/live";
 import { AlwaysOn } from "../src/core/always-on";
 import { SyncController } from "../src/core/sync";
 import type { AutoConfig, AutoProtection } from "../src/core/auto-config";
-import { batchSchema, type State } from "../src/core/schema";
+import { batchSchema, activityBatchSchema, type State } from "../src/core/schema";
 import type { Delivery, Probe, SyncNative } from "../src/core/sync-config";
 import { derive, open, seal } from "../src/core/crypto";
 import { MemoryStorage, NOW, PASSWORD, provenance } from "./fixtures";
@@ -36,11 +36,11 @@ class FakeNative implements AutoProtection, SyncNative {
     }
     async deliver(blob: string, account: string, input: unknown): Promise<Delivery> {
         this.requests++;
-        const c = this.syncs.get(atob(blob))!, batch = batchSchema.parse(input);
+        const c = this.syncs.get(atob(blob))!, batch = batchSchema.or(activityBatchSchema).parse(input);
         assert.equal(batch.grant.grantId, c.grantId); assert.equal(batch.principalId, "collector-home"); assert.equal(batch.grant.allowExport, true); assert.equal(account, c.accountId);
         const s = this.status();
         if (s !== 200) return { ok: false, kind: s === 401 ? "credentials" : s === 403 ? "refused" : "retry", status: s };
-        if (batch.events.some(e => this.poison.has(e.messageId))) return { ok: false, kind: "refused", status: 409 };
+        if (batch.events.some(e => "messageId" in e && this.poison.has(e.messageId))) return { ok: false, kind: "refused", status: 409 };
         for (const e of batch.events) this.received.set(e.eventId, e);
         return { ok: true, receipt: { version: 1, receiptId: crypto.randomUUID(), checkpoint: this.requests, accepted: batch.events.length, duplicates: 0, committedAt: new Date(NOW).toISOString() } };
     }
@@ -177,5 +177,17 @@ test("manual export still works for a sync-enabled grant", async () => {
     const grant = c.status().grants.at(-1)!;
     const envelope = await c.export(grant.grantId, "different transfer passphrase", true);
     assert.equal(envelope.context, "coordination-batch/v1");
+    await auto.disable();
+});
+
+
+test("activity sync uses the native path, receipts clear pending records, and mixed batches preserve messages", async () => {
+    const { auto, c, sync, native, emit, advance } = await setup();
+    await auto.enable(PASSWORD, true, true, SETUP); await emit("1");
+    const g = c.status().grants.find(g => g.grantId === auto.grantId)!;
+    await c.configureActivity(g.grantId, { ...g.activity, members: true, userIds: ["22"], allowExport: true }, true);
+    await c.captureActivity(g.grantId, g.accountId, { type: "person.snapshot", userId: "22", personalNickname: "Friend", displayName: "Display", username: "account" });
+    await sync.syncNow(); advance(3000); await sync.tick();
+    assert.equal(native.received.size, 2); assert.equal(c.status().sync.pending, 0);
     await auto.disable();
 });

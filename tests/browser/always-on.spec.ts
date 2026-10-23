@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 test("password and one accept button start capture; reload needs no password; stop survives reload", async ({ page }) => {
     const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
-    await page.clock.install(); await page.goto("http://127.0.0.1:4319/?always=1");
+    await page.clock.install(); await page.goto(`http://127.0.0.1:${process.env.COLLECTOR_HOST_TEST_PORT ?? "4319"}/?always=1`);
     await expect(page.getByRole("button", { name: "Accept at my own risk and start collecting" })).toBeEnabled();
     await page.getByLabel("Buffer passphrase", { exact: false }).fill("simple one time browser passphrase");
     expect(await page.evaluate(() => (window as any).__liveFixture.status().active)).toBe(false);
@@ -21,7 +21,7 @@ test("password and one accept button start capture; reload needs no password; st
 });
 
 test("wrong password and switching accounts cannot start unauthorized capture", async ({ page }) => {
-    await page.goto("http://127.0.0.1:4319/?always=1");
+    await page.goto(`http://127.0.0.1:${process.env.COLLECTOR_HOST_TEST_PORT ?? "4319"}/?always=1`);
     await page.getByLabel("Buffer passphrase", { exact: false }).fill("another one time browser passphrase");
     await page.getByRole("button", { name: "Accept at my own risk and start collecting" }).click();
     await expect(page.getByText(/Continuous — no session time limit/)).toBeVisible();

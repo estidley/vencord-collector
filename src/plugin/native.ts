@@ -3,7 +3,7 @@ import { safeStorage } from "electron";
 import { randomBytes } from "node:crypto";
 import { autoConfigSchema, type AutoConfig } from "../core/auto-config";
 import { derive, seal, type Secret } from "../core/crypto";
-import { batchSchema, id, parseSafe } from "../core/schema";
+import { batchSchema, activityBatchSchema, id, parseSafe } from "../core/schema";
 import { classify, receiptSchema, syncConfigSchema, syncSetupSchema, type Delivery, type Probe, type SyncConfig } from "../core/sync-config";
 
 // Native code protects credentials and, only when sync is configured, delivers sealed batches to the
@@ -72,9 +72,9 @@ export async function probeSync(_event: unknown, ciphertext: string, accountId: 
 }
 export async function deliver(_event: unknown, ciphertext: string, accountId: string, input: unknown): Promise<Delivery> {
     const config = openSync(ciphertext, accountId);
-    const batch = parseSafe(batchSchema, input);
+    const batch = parseSafe(batchSchema.or(activityBatchSchema), input);
     // The renderer can only ask to deliver batches for the one configured grant, importer and account.
-    if (batch.grant.grantId !== config.grantId || batch.grant.accountId !== accountId || !batch.grant.allowExport ||
+    if (batch.grant.grantId !== config.grantId || batch.grant.accountId !== accountId || !batch.grant.allowExport || (batch.protocol === "personal-coordination/activity-file" && !batch.grant.activity.allowExport) ||
         batch.principalId !== config.principalId || batch.grant.principalId !== config.principalId ||
         batch.events.some(e => e.grantId !== config.grantId || e.accountId !== accountId))
         throw new Error("Batch does not match the configured sync permission.");

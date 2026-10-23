@@ -1,5 +1,7 @@
 # Vencord Collector: messages, events and activity
 
+**2026-10-22 update:** [People-first capture and read-only MCP integration](EXPANDED-CAPTURE.md) adds personal nickname preference, scoped message details and activity sync. That guide supersedes older activity-local-only limitations below.
+
 The product and repository are now **Vencord Collector** / `vencord-collector`. The existing plugin ID `MessageCollector`, generated folder `messageCollector`, native helper name, and IndexedDB database name intentionally stay stable. They are compatibility identifiers: existing encrypted buffers, enabled settings and remembered-password records must not be orphaned by a cosmetic rename. In Vencord's plugin list search for **MessageCollector**; its description and settings panel say **Vencord Collector**.
 
 ## Capture a section of older messages

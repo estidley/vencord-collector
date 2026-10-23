@@ -99,3 +99,13 @@ test("activity storage errors stop collection without a plaintext fallback", asy
     const f = await fixture(); await f.collector.configureActivity(f.grant.grantId, permission, true);
     f.storage.fail = true; f.engine.poll(); await f.engine.drained(); assert.equal(f.live.active, false); assert.equal(f.collector.unlocked, false);
 });
+
+
+test("delivered scheduled-event deletion is recorded explicitly and stale cache cannot resurrect it", async () => {
+    const f = await fixture(); await f.collector.configureActivity(f.grant.grantId, { ...permission, presence: false, voice: false }, true);
+    f.engine.poll(); await f.engine.drained();
+    f.engine.scheduledEvent({ guildScheduledEvent: { id: "400", guild_id: "500" } }, true); await f.engine.drained();
+    f.advance(6000); f.engine.poll(); await f.engine.drained();
+    const state = await f.state(); assert.deepEqual(state.activities.map(e => e.observation.type), ["scheduled-event.snapshot", "scheduled-event.deleted"]);
+    f.live.stop();
+});
