@@ -37,11 +37,15 @@ test("People tab defaults to personal nicknames, persists preference, and requir
     await expect(page.getByLabel("Preferred name first")).toHaveValue("personalNickname");
     await page.getByLabel("Collect selected people's personal nicknames").check();
     await page.getByLabel("User IDs to watch").fill("20");
+    await page.getByRole("button", { name: "Use all current servers for names and roles" }).click();
+    await expect(page.getByLabel("Additional server IDs for names and roles only")).toHaveValue("500, 501");
     await page.getByLabel("Preferred name first").selectOption("username");
     await page.getByLabel("I confirm authority").check();
     await page.getByRole("button", { name: "Save activity choices" }).click();
     await expect(page.getByText(/Activity permission saved/)).toBeVisible();
     expect(await page.evaluate(() => (window as any).__liveFixture.choices().namePreference[0])).toBe("username");
+    expect(await page.evaluate(() => (window as any).__liveFixture.choices().memberGuildIds)).toEqual(["500", "501"]);
+    expect(await page.evaluate(() => (window as any).__liveFixture.choices().guildIds)).toEqual([]);
     expect(await page.evaluate(() => (window as any).__liveFixture.activity())).toBe(1);
     await page.reload(); await expect(page.getByLabel("Preferred name first")).toHaveValue("username");
     expect(await page.locator('img').count()).toBe(0);

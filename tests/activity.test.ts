@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Collector } from "../src/core/collector";
 import { ActivityCapture, scheduledSnapshot } from "../src/core/activity";
-import { noActivity } from "../src/core/activity-schema";
+import { noActivity, permitsActivity } from "../src/core/activity-schema";
 import { LiveCapture } from "../src/core/live";
 import { decodeActivityBatch, decodeBatch } from "../src/core/connector";
 import { derive, open, seal } from "../src/core/crypto";
@@ -13,6 +13,27 @@ const scheduled = { id: "400", guild_id: "500", channel_id: null, creator_id: "6
     description: "Bring dice", scheduled_start_time: "2026-10-22T19:00:00Z", scheduled_end_time: null, status: 1,
     entity_metadata: { location: "Club room" }, recurrence_rule: null };
 const permission = { scheduledEvents: true, presence: true, voice: true, guildIds: ["500"], userIds: ["600"], allowExport: true };
+
+test("additional identity servers capture aliases without widening event or voice scopes", async () => {
+    const f = await fixture();
+    const p = { ...noActivity(), members: true, userIds: ["600"], memberGuildIds: ["500", "501"], allowExport: true };
+    await f.collector.configureActivity(f.grant.grantId, p, true);
+    const calls: string[] = [];
+    const engine = new ActivityCapture(f.collector, f.live, { accountId: () => f.grant.accountId,
+        scheduledEvents: () => { throw new Error("Unexpected event read"); }, presence: () => undefined, voice: () => undefined,
+        person: userId => ({ type: "person.snapshot", userId, personalNickname: "Gianni port", username: "geekin4612", displayName: null }),
+        member: (guildId, userId) => { calls.push(guildId); return { type: "member.snapshot", guildId, userId, personalNickname: "Gianni port", nickname: `Alias ${guildId}`, displayName: null, roles: [] }; }
+    }, f.now);
+    engine.poll(); await engine.drained();
+    assert.deepEqual(calls, ["500", "501"]);
+    assert.equal(f.collector.status().activityCount, 3);
+    assert.equal(permitsActivity({ ...p, scheduledEvents: true }, { type: "scheduled-event.deleted", guildId: "501", scheduledEventId: "400" }), false);
+    const live = new LiveCapture(f.collector, { accountId: () => f.grant.accountId, selectedChannelId: () => undefined, provenance: () => undefined, cachedGuildIds: () => ["500", "501", "500"] });
+    assert.deepEqual(live.cachedGuildIds(), ["500", "501"]);
+    await f.collector.configureActivity(f.grant.grantId, { ...p, memberGuildIds: ["500"] }, true);
+    assert.equal((await f.state()).activities.some(e => e.observation.type === "member.snapshot" && e.observation.guildId === "501"), false);
+    f.live.stop();
+});
 async function fixture() {
     const storage = new MemoryStorage(); let now = NOW, account = "100000000000000001", presence: unknown = "online", voice: string | undefined = "700";
     const collector = new Collector(storage, () => now); await collector.unlock(PASSWORD);

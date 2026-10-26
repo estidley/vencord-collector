@@ -62,6 +62,15 @@ export function createCaptureExtras(React: Pick<typeof ReactTypes, "createElemen
                             setPermission({ ...permission, namePreference: [key, ...permission.namePreference.filter(k => k !== key)] }); setAuthority(false);
                         }}>{([ ["personalNickname", "My personal nickname"], ["nickname", "Server nickname"], ["displayName", "Discord display name"], ["username", "Username"] ] as const).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></label>
                         <p>Fallback order: {permission.namePreference.join(" / ")}</p>
+                        <p>Search can match part of a name: “Gianni” matches “Gianni port”. Personal nicknames stay preferred; server aliases identify the same Discord user.</p>
+                        <button onClick={() => void run(async () => {
+                            const memberGuildIds = live.cachedGuildIds();
+                            setPermission({ ...permission, memberGuildIds }); setAuthority(false);
+                            return `${memberGuildIds.length} current servers selected for names and roles only. Select people and save to apply. New servers require adding again.`;
+                        })}>Use all current servers for names and roles</button>
+                        <label style={{ display: "block" }}>Additional server IDs for names and roles only<input value={permission.memberGuildIds.join(", ")} onChange={e => {
+                            setPermission({ ...permission, memberGuildIds: ids(e.target.value) }); setAuthority(false);
+                        }} /></label>
                         <p>Select people already present in your retained messages, or enter IDs below:</p>
                         <div style={{ maxHeight: 200, overflow: "auto" }}>{collector.people().map(person => <label key={person.id} style={{ display: "block" }}><input type="checkbox" checked={ids(users).includes(person.id)} onChange={e => {
                             setUsers((e.target.checked ? [...ids(users), person.id] : ids(users).filter(id => id !== person.id)).join(", ")); setAuthority(false);

@@ -1,5 +1,7 @@
 # People first, expanded capture, and a read-only MCP
 
+Nickname search now supports partial words (Gianni matches Gianni port) in the receiver's `get_people.query` and `search_messages.senderName`. Personal nicknames are preferred. In People and names, **Use all current servers for names and roles** adds currently cached server IDs for identity capture only, keeping event/voice scope unchanged. Select people, enable identity collection and activity export, and save. New servers require adding again; only already cached member details are available. The receiver also needs explicit `nameSearchFields` and identity observation permissions; see its `docs/NAME-SEARCH.md`. Other users sharing the same partial name remain separate candidate IDs.
+
 The People and names tab prioritizes your personal nickname from Discord's RelationshipStore. It retains this separately from a server nickname, display name, and username. Select people from IDs already in your retained messages or enter IDs. Choose servers for their cached roles and server nicknames; global names do not require a server selection. No member directory is fetched.
 
 Choose the first name source in the tab. The remaining sources form a fallback order. The default is personal nickname, server nickname, display name, username. Activity handoffs contain the available variants; the MCP's reader policy controls which variants may reach an AI. Its default is one resolved `preferredName` and its source, not all aliases. This does not redact names someone typed into message text or historical channel labels.

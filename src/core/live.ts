@@ -8,6 +8,7 @@ export interface LiveHost {
     provenance(channelId: string): Provenance | undefined;
     cachedMessage?(channelId: string, messageId: string): unknown;
     loadedMessages?(channelId: string): readonly unknown[];
+    cachedGuildIds?(): readonly string[];
 }
 type EventName = "MESSAGE_CREATE" | "MESSAGE_UPDATE" | "MESSAGE_DELETE" | "MESSAGE_DELETE_BULK";
 const HOUR = 60 * 60_000;
@@ -62,6 +63,11 @@ export class LiveCapture {
             if (this.host.accountId() !== this.account) this.stop("Account changed. Live capture stopped and buffer locked.");
             else if (this.clock() >= this.deadline) this.stop("The one-hour live session ended. Unlock to start another session.");
         } catch { this.stop("Client state is unavailable. Live capture stopped."); }
+    }
+    cachedGuildIds() {
+        const ids = [...new Set(this.host.cachedGuildIds?.() ?? [])];
+        if (ids.length > 200 || ids.some(value => !id.safeParse(value).success)) throw new Error("Too many or invalid cached servers; select server IDs manually.");
+        return ids;
     }
     currentDraft() {
         const accountId = this.host.accountId(); const channelId = this.host.selectedChannelId();

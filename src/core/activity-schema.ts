@@ -7,6 +7,7 @@ export const activityPermissionSchema = z.strictObject({
     guildIds: z.array(id).max(100), userIds: z.array(id).max(100), allowExport: z.boolean()
     , members: z.boolean().default(false), channelContext: z.boolean().default(false), unread: z.boolean().default(false), games: z.boolean().default(false),
     channelIds: z.array(id).max(100).default([]),
+    memberGuildIds: z.array(id).max(200).default([]),
     namePreference: z.array(z.enum(["personalNickname", "nickname", "displayName", "username"])).min(1).max(4).default(["personalNickname", "nickname", "displayName", "username"])
 }).superRefine((p, ctx) => {
     if ((p.scheduledEvents || p.voice) && !p.guildIds.length)
@@ -15,10 +16,10 @@ export const activityPermissionSchema = z.strictObject({
         ctx.addIssue({ code: "custom", message: "Choose people for presence and voice." });
     if ((p.channelContext || p.unread) && !p.channelIds.length)
         ctx.addIssue({ code: "custom", message: "Choose channels for context and unread state." });
-    if (p.guildIds.length * p.userIds.length > 1000)
+    if (new Set([...p.guildIds, ...p.memberGuildIds]).size * p.userIds.length > 1000)
         ctx.addIssue({ code: "custom", message: "Choose at most 1,000 server/person pairs." });
 });
-export const noActivity = () => ({ scheduledEvents: false, presence: false, voice: false, members: false, channelContext: false, unread: false, games: false, guildIds: [], userIds: [], channelIds: [], namePreference: ["personalNickname", "nickname", "displayName", "username"] as ("personalNickname" | "nickname" | "displayName" | "username")[], allowExport: false });
+export const noActivity = () => ({ scheduledEvents: false, presence: false, voice: false, members: false, channelContext: false, unread: false, games: false, guildIds: [], memberGuildIds: [] as string[], userIds: [], channelIds: [], namePreference: ["personalNickname", "nickname", "displayName", "username"] as ("personalNickname" | "nickname" | "displayName" | "username")[], allowExport: false });
 export type ActivityPermission = z.infer<typeof activityPermissionSchema>;
 const recurrence = z.strictObject({
     start: time, end: time.nullable(), frequency: z.number().int().min(0).max(3), interval: z.number().int().min(1),
@@ -57,7 +58,7 @@ export const activityEventSchema = z.strictObject({
 export type ActivityEvent = z.infer<typeof activityEventSchema>;
 export function permitsActivity(p: ActivityPermission, o: ActivityObservation) {
     if (o.type === "person.snapshot") return p.members && p.userIds.includes(o.userId);
-    if (o.type === "member.snapshot") return p.members && p.guildIds.includes(o.guildId) && p.userIds.includes(o.userId);
+    if (o.type === "member.snapshot") return p.members && (p.guildIds.includes(o.guildId) || p.memberGuildIds.includes(o.guildId)) && p.userIds.includes(o.userId);
     if (o.type === "channel.snapshot") return p.channelContext && p.channelIds.includes(o.channelId);
     if (o.type === "unread.observed") return p.unread && p.channelIds.includes(o.channelId);
     if (o.type === "game.observed") return p.games && p.userIds.includes(o.userId);

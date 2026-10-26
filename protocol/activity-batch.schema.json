@@ -85,6 +85,7 @@
             "unread": false,
             "games": false,
             "guildIds": [],
+            "memberGuildIds": [],
             "userIds": [],
             "channelIds": [],
             "namePreference": [
@@ -150,6 +151,15 @@
                 "pattern": "^[0-9]{1,20}$"
               }
             },
+            "memberGuildIds": {
+              "default": [],
+              "maxItems": 200,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{1,20}$"
+              }
+            },
             "namePreference": {
               "default": [
                 "personalNickname",
@@ -183,6 +193,7 @@
             "unread",
             "games",
             "channelIds",
+            "memberGuildIds",
             "namePreference"
           ],
           "additionalProperties": false

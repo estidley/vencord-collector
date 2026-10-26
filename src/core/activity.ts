@@ -64,7 +64,7 @@ export class ActivityCapture {
             };
             // Priority: identity context for selected people, never a member-list crawl.
             if (p.members) for (const user of p.userIds) observe(`person:${user}`, this.host.person?.(user));
-            if (p.members) for (const guild of p.guildIds) for (const user of p.userIds) observe(`member:${guild}:${user}`, this.host.member?.(guild, user));
+            if (p.members) for (const guild of new Set([...p.guildIds, ...p.memberGuildIds])) for (const user of p.userIds) observe(`member:${guild}:${user}`, this.host.member?.(guild, user));
             for (const channel of p.channelIds) {
                 if (p.channelContext) observe(`channel:${channel}`, this.host.channel?.(channel));
                 if (p.unread) observe(`unread:${channel}`, this.host.unread?.(channel));

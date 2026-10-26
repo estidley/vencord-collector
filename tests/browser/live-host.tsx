@@ -14,6 +14,7 @@ import type { SyncNative } from "../../src/core/sync-config";
 let account = "100000000000000001"; const channel = "200000000000000001";
 const storage = new IndexedDbStorage(); const collector = new Collector(storage);
 const live = new LiveCapture(collector, {
+    cachedGuildIds: () => ["500", "501"],
     accountId: () => account, selectedChannelId: () => channel,
     loadedMessages: () => [{ id: "300000000000000003", channel_id: channel, author: { id: account }, timestamp: new Date().toISOString(), content: "synthetic cached text" }],
     provenance: () => ({ kind: "dm", guildId: null, guildName: null, channelId: channel,

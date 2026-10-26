@@ -24,6 +24,7 @@ const live = new LiveCapture(collector, {
     selectedChannelId: () => SelectedChannelStore.getChannelId(),
     cachedMessage: (channelId, messageId) => MessageStore.getMessage(channelId, messageId),
     loadedMessages: channelId => MessageStore.getMessages(channelId)?._array ?? [],
+    cachedGuildIds: () => Object.keys(GuildStore?.getGuilds() ?? {}),
     provenance: channelId => {
         const accountId = UserStore.getCurrentUser()?.id;
         const channel = visibleChannel(channelId);
