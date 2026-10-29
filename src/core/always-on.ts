@@ -5,6 +5,11 @@ import { parseSafe } from "./schema";
 import { syncSetupSchema, type SyncSetup } from "./sync-config";
 import type { SyncController } from "./sync";
 
+// If capture stops underneath a running always-on session (a fail-closed stop such as an unexpected client
+// event or a save error), resume it in-session with backoff instead of waiting for the next Discord restart.
+// Resuming re-runs exactly the restart-time checks: same account, same saved grant, continuous and not revoked.
+export const RESUME_DELAY = 60_000, MAX_RESUME_DELAY = 15 * 60_000, RESUME_RESET = 60 * 60_000;
+
 /** No plaintext credential is retained on this controller or placed in settings. */
 export class AlwaysOn {
     private running = false;
@@ -16,23 +21,26 @@ export class AlwaysOn {
     private notice = "Always-on collection is off.";
     private listeners = new Set<() => void>();
     private runningGrant?: string;
+    private resumeAt = 0;
+    private resumes = 0;
+    private startedAt = 0;
     constructor(private collector: Collector, private live: LiveCapture, private storage: AutoStorage,
         private protection: () => AutoProtection | undefined, private accountId: () => string | undefined,
-        private sync?: SyncController) {}
+        private sync?: SyncController, private clock = () => Date.now()) {}
     /** The continuous grant currently being collected, for receiver sync. */
     get grantId() { return this.enabled && this.live.active ? this.runningGrant : undefined; }
     subscribe(fn: () => void) { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
     private notify() { for (const fn of this.listeners) fn(); }
-    status() { return { enabled: this.enabled, busy: this.busy, notice: this.notice }; }
+    status() { return { enabled: this.enabled, busy: this.busy, notice: this.notice, resumeAt: this.resumeAt || null }; }
     private serial<T>(fn: () => Promise<T>) { const task = this.pending.then(fn); this.pending = task.catch(() => {}); return task; }
     private check(generation: number, account: string) {
         if (!this.running || generation !== this.generation || this.accountId() !== account) throw new Error("Automatic collection was cancelled or the account changed.");
     }
-    activate() { this.running = true; this.attempted = undefined; }
-    shutdown() { this.running = false; this.generation++; this.enabled = false; this.runningGrant = undefined; this.live.stop(); this.notify(); }
-    accountChanged() { this.generation++; this.attempted = undefined; this.enabled = false; this.runningGrant = undefined; this.live.stop("Account changed or logged out. Collection paused."); this.notify(); }
+    activate() { this.running = true; this.attempted = undefined; this.resumeAt = 0; this.resumes = 0; }
+    shutdown() { this.resumeAt = 0; this.running = false; this.generation++; this.enabled = false; this.runningGrant = undefined; this.live.stop(); this.notify(); }
+    accountChanged() { this.resumeAt = 0; this.generation++; this.attempted = undefined; this.enabled = false; this.runningGrant = undefined; this.live.stop("Account changed or logged out. Collection paused."); this.notify(); }
     async disable() {
-        this.generation++; this.enabled = false; this.runningGrant = undefined; this.attempted = this.accountId(); this.live.stop(); this.notify();
+        this.generation++; this.resumeAt = 0; this.enabled = false; this.runningGrant = undefined; this.attempted = this.accountId(); this.live.stop(); this.notify();
         return this.serial(async () => {
             try {
                 await this.storage.writeAuto(undefined); await this.sync?.disarm();
@@ -65,7 +73,7 @@ export class AlwaysOn {
                 const encrypted = await native.protect({ version: 1, accountId: account, grantId: grant.grantId, passphrase });
                 this.check(generation, account); await this.storage.writeAuto(encrypted); this.check(generation, account);
                 await this.live.start(grant.grantId, true, true); this.check(generation, account);
-                this.enabled = true; this.runningGrant = grant.grantId; this.attempted = account;
+                this.enabled = true; this.runningGrant = grant.grantId; this.attempted = account; this.startedAt = this.clock(); this.resumes = 0;
                 this.notice = setup ? "Always-on enabled with receiver sync. Collection and sync resume whenever Discord opens."
                     : "Always-on enabled. Collection resumes for this account whenever Discord opens.";
             } catch (error) {
@@ -81,7 +89,23 @@ export class AlwaysOn {
     }
     async restore() {
         const account = this.accountId();
-        if (!this.running || !account || this.busy || this.attempted === account || this.live.active) return;
+        if (!this.running || !account || this.busy || this.live.active) return;
+        if (this.attempted === account) {
+            // Only a session that was running for this account and then stopped underneath us is resumed.
+            // Disable, account change, shutdown and a failed restore all clear enabled, so they never retry here.
+            if (!this.enabled || this.runningGrant === undefined) return;
+            const now = this.clock();
+            if (!this.resumeAt) {
+                if (this.startedAt && now - this.startedAt >= RESUME_RESET) this.resumes = 0;
+                this.resumeAt = now + Math.min(MAX_RESUME_DELAY, RESUME_DELAY * 2 ** this.resumes);
+                const reason = this.live.status().notice;
+                this.notice = `Collection stopped (${reason}). Resuming automatically at ${new Date(this.resumeAt).toLocaleTimeString()}.`;
+                try { console.warn("[MessageCollector] capture stopped; scheduling automatic resume:", reason); } catch {}
+                this.notify(); return;
+            }
+            if (now < this.resumeAt) return;
+            this.resumeAt = 0; this.resumes++;
+        }
         this.attempted = account;
         const generation = this.generation;
         this.busy = true; this.notify();
@@ -99,10 +123,11 @@ export class AlwaysOn {
                 const grant = this.collector.status().grants.find(g => g.grantId === config.grantId);
                 if (!grant?.continuous || grant.revokedAt || grant.accountId !== account) throw new Error();
                 await this.live.start(grant.grantId, true, true); this.check(generation, account);
-                this.enabled = true; this.runningGrant = grant.grantId;
+                this.enabled = true; this.runningGrant = grant.grantId; this.startedAt = this.clock();
                 this.notice = grant.allowExport ? "Always-on restored with receiver sync. Collecting while Discord is open."
                     : "Always-on restored. Collecting while Discord is open.";
             } catch {
+                try { console.warn("[MessageCollector] automatic collection could not resume"); } catch {}
                 if (generation === this.generation) { this.live.stop(); this.enabled = false; this.runningGrant = undefined; this.notice = "Automatic collection could not resume. Unlock and review the buffer, or disable always-on and enable it again."; }
             } finally { this.busy = false; this.notify(); }
         });

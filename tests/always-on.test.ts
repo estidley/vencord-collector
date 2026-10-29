@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Collector } from "../src/core/collector";
 import { LiveCapture } from "../src/core/live";
-import { AlwaysOn } from "../src/core/always-on";
+import { AlwaysOn, MAX_RESUME_DELAY, RESUME_DELAY } from "../src/core/always-on";
 import type { AutoConfig, AutoProtection } from "../src/core/auto-config";
 import { grantDraftSchema, type State } from "../src/core/schema";
 import { decodeBatch } from "../src/core/connector";
@@ -25,7 +25,7 @@ async function setup(native = protection()) {
     const vault = new MemoryStorage(), saved = new Remembered(); let now = NOW, account = "100000000000000001";
     const c = new Collector(vault, () => now);
     const live = new LiveCapture(c, { accountId: () => account, selectedChannelId: () => provenance.channelId, provenance: () => provenance }, () => now);
-    const auto = new AlwaysOn(c, live, saved, () => native, () => account); auto.activate(); await c.unlock(PASSWORD);
+    const auto = new AlwaysOn(c, live, saved, () => native, () => account, undefined, () => now); auto.activate(); await c.unlock(PASSWORD);
     const emit = async (messageId = "1") => { live.receive("MESSAGE_CREATE", { message: { id: messageId, channel_id: provenance.channelId,
         author: { id: account }, timestamp: new Date(now).toISOString(), content: "continuous synthetic content" } }); await live.drained(); };
     return { c, live, auto, vault, saved, native, emit, advance: (ms: number) => { now += ms; }, account: (value: string) => { account = value; auto.accountChanged(); } };
@@ -118,4 +118,33 @@ test("continuous capacity rollover removes oldest own records while preserving i
     assert.ok(!after.records.some(r => r.event.messageId === "1")); assert.ok(after.records.some(r => r.event.messageId === "5001"));
     assert.ok(after.records.some(r => r.event.messageId === "99999"));
     assert.equal(after.audit.at(-1)!.action, "capacity-prune"); await auto.disable();
+});
+
+test("a fail-closed stop during an always-on session resumes in-session with backoff", async () => {
+    const { auto, live, c, emit, advance } = await setup();
+    await auto.enable(PASSWORD, true, true); await emit();
+    live.stop("Unexpected client event. Capture stopped; review compatibility before restarting.");
+    assert.equal(live.active, false); assert.equal(c.unlocked, false);
+    await auto.restore(); assert.equal(live.active, false); assert.match(auto.status().notice, /Resuming automatically/);
+    advance(RESUME_DELAY - 1); await auto.restore(); assert.equal(live.active, false);
+    advance(1); await auto.restore(); assert.equal(live.active, true); assert.equal(auto.grantId !== undefined, true);
+    await emit("2"); assert.equal(c.status().count, 2);
+    // A second stop soon after waits twice as long; the delay is capped.
+    live.stop(); await auto.restore(); advance(RESUME_DELAY); await auto.restore(); assert.equal(live.active, false);
+    advance(RESUME_DELAY); await auto.restore(); assert.equal(live.active, true);
+    assert.ok(MAX_RESUME_DELAY >= RESUME_DELAY); await auto.disable();
+});
+
+test("disable, revoke, and account change never auto-resume", async () => {
+    const { auto, live, c, advance, account } = await setup();
+    await auto.enable(PASSWORD, true, true); await auto.disable();
+    await auto.restore(); advance(MAX_RESUME_DELAY * 2); await auto.restore(); assert.equal(live.active, false);
+    const second = await setup(); await second.auto.enable(PASSWORD, true, true);
+    await second.c.revoke(second.c.status().grants[0]!.grantId);
+    await second.auto.restore(); second.advance(MAX_RESUME_DELAY * 2); await second.auto.restore(); second.advance(MAX_RESUME_DELAY * 2); await second.auto.restore();
+    assert.equal(second.live.active, false); assert.equal(second.c.unlocked, false);
+    const third = await setup(); await third.auto.enable(PASSWORD, true, true);
+    third.account("999"); await third.auto.restore(); third.advance(MAX_RESUME_DELAY * 2); await third.auto.restore();
+    assert.equal(third.live.active, false); assert.equal(third.c.unlocked, false);
+    void c; void account;
 });
