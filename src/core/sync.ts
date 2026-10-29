@@ -4,6 +4,10 @@ import { syncSetupSchema, type Failure, type SyncNative, type SyncSetup, type Sy
 
 const IDLE = 30_000, MORE = 2_000, NUDGE = 5_000, MAX_BACKOFF = 15 * 60_000;
 const CHUNK = 500, BUDGET = 20; // at most 20 receiver requests per pass, well under its 120/minute limit
+// While capture is running, prove liveness to the receiver at least this often even when nothing is pending.
+// It reuses the existing authenticated checkpoint call (audited as "checkpoint ok"), carries no message data,
+// and stops the moment capture stops, so an outside watchdog can tell "quiet" apart from "capture is off".
+export const HEARTBEAT = 5 * 60_000;
 
 export type SyncState = "off" | "waiting" | "idle" | "syncing" | "error";
 class Stop extends Error { constructor(readonly failure: Failure) { super(failure.kind); } }
@@ -22,6 +26,7 @@ export class SyncController {
     private state: SyncState = "off";
     private message = "Sync to personal-coordination-mcp is off.";
     private lastDeliveredAt: string | null = null;
+    private lastBeat = 0;
     private listeners = new Set<() => void>();
     constructor(private collector: Collector, private storage: SyncStorage, private native: () => SyncNative | undefined,
         private accountId: () => string | undefined, private grantId: () => string | undefined, private clock = () => Date.now()) {
@@ -71,6 +76,10 @@ export class SyncController {
             }
             const pending = this.collector.pendingSync(grantId);
             if (!pending.length) {
+                if (this.clock() - this.lastBeat >= HEARTBEAT) {
+                    this.lastBeat = this.clock();
+                    try { await native.probeSync(this.blob, account); } catch { /* heartbeat only; real errors surface on delivery */ }
+                }
                 this.nextAt = this.clock() + IDLE; this.failures = 0;
                 if (this.state !== "idle") this.set("idle", "Up to date.");
                 return;
@@ -86,7 +95,7 @@ export class SyncController {
                 const result = await native.deliver(this.blob, account, batch);
                 if (result.ok) {
                     delivered += await this.collector.markSynced(grantId, batch.events.map(e => e.eventId), "delivered");
-                    this.lastDeliveredAt = result.receipt.committedAt;
+                    this.lastDeliveredAt = result.receipt.committedAt; this.lastBeat = this.clock(); // an audited ingest is itself a heartbeat
                 } else if (result.kind !== "refused") throw new Stop(result);
                 else if (ids.length > 1) { const mid = Math.ceil(ids.length / 2); queue.unshift(ids.slice(0, mid), ids.slice(mid)); lastRefusal = result.status; }
                 else { refused.push(ids[0]!); lastRefusal = result.status; }

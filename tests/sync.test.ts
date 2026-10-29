@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Collector } from "../src/core/collector";
 import { LiveCapture } from "../src/core/live";
 import { AlwaysOn } from "../src/core/always-on";
-import { SyncController } from "../src/core/sync";
+import { HEARTBEAT, SyncController } from "../src/core/sync";
 import type { AutoConfig, AutoProtection } from "../src/core/auto-config";
 import { batchSchema, activityBatchSchema, type State } from "../src/core/schema";
 import type { Delivery, Probe, SyncNative } from "../src/core/sync-config";
@@ -25,12 +25,14 @@ class FakeNative implements AutoProtection, SyncNative {
     poison = new Set<string>(); // message IDs the receiver refuses with 409
     received = new Map<string, unknown>(); // eventId -> event
     requests = 0;
+    probes = 0;
     async available() { return true; }
     async protect(config: AutoConfig) { const t = crypto.randomUUID(); this.autos.set(t, structuredClone(config)); return btoa(t); }
     async restore(token: string, account: string) { const c = this.autos.get(atob(token)); if (!c) throw new Error(); return c.accountId === account ? structuredClone(c) : undefined; }
     async protectSync(setup: Record<string, unknown>) { const t = crypto.randomUUID(); this.syncs.set(t, structuredClone(setup)); return btoa(t); }
     private status(): number { return { ok: 200, down: 0, busy: 503, "401": 401, "403": 403 }[this.mode]; }
     async probeSync(blob: string, account: string): Promise<Probe> {
+        this.probes++;
         const c = this.syncs.get(atob(blob)); assert.equal(c?.accountId, account); assert.equal(c?.token, TOKEN);
         const s = this.status(); return s === 200 ? { ok: true, checkpoint: 0 } : { ok: false, kind: s === 401 ? "credentials" : s === 403 ? "refused" : "retry", status: s };
     }
@@ -189,5 +191,17 @@ test("activity sync uses the native path, receipts clear pending records, and mi
     await c.captureActivity(g.grantId, g.accountId, { type: "person.snapshot", userId: "22", personalNickname: "Friend", displayName: "Display", username: "account" });
     await sync.syncNow(); advance(3000); await sync.tick();
     assert.equal(native.received.size, 2); assert.equal(c.status().sync.pending, 0);
+    await auto.disable();
+});
+
+test("idle running capture sends a content-free checkpoint heartbeat, and stops once capture stops", async () => {
+    const { auto, sync, native, live, advance } = await setup();
+    await auto.enable(PASSWORD, true, true, SETUP);
+    const base = native.probes; // arm() probes once during setup
+    await sync.syncNow(); assert.equal(native.probes, base + 1, "first idle pass heartbeats immediately");
+    advance(60_000); await sync.syncNow(); assert.equal(native.probes, base + 1, "no heartbeat before the interval");
+    advance(HEARTBEAT); await sync.syncNow(); assert.equal(native.probes, base + 2, "heartbeat after the interval");
+    live.stop(); advance(HEARTBEAT * 3); await sync.syncNow();
+    assert.equal(native.probes, base + 2, "no heartbeat while capture is off, so a watchdog can see the outage");
     await auto.disable();
 });
