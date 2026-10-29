@@ -49,7 +49,7 @@ In Discord: open each important DM or group DM from Oct 25 to 29 (and Inbox → 
 - [x] Backfill assessed; automated backfill not built (self-bot / design boundary). Manual safe path documented.
 - [x] Capture heartbeat (`src/core/sync.ts`) + test; `npm run check` passes 79/79
 - [x] Watchdog + read-only health query written; dry-run verified (`ok`, and forced `stale` with `-NoRestart`)
-- [ ] PR merged; heartbeat build deployed; heartbeats seen in the receiver audit
-- [ ] Watchdog task registered and first real run healthy
+- [x] PR #5 merged (two Bugbot findings fixed first); heartbeat build deployed 1:52 PM CDT via a live test of the watchdog's real recovery path. Heartbeat code is confirmed in the loaded bundle. While traffic is continuous, each delivery counts as the heartbeat, so `checkpoint ok` rows show up only after 5 idle min.
+- [x] Task "Discord Collector Watchdog" registered (every 15 min + at logon, headless); first run result 0, state `ok`. The watchdog state file was reset after the deploy test.
 
-_Last updated: 2026-10-29 1:30 PM CDT_
+_Last updated: 2026-10-29 2:10 PM CDT_
