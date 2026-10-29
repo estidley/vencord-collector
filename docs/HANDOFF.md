@@ -1,0 +1,17 @@
+# HANDOFF: Vencord Collector always-on stall fix (Oct 29, 2026)
+
+On Oct 29, 2026, Ethan reported that the read-only "Discord messages" MCP had stopped picking up new messages. He asked to find out why and fix it, update Discord, rebuild and re-patch Vencord (always the newest upstream), and get messages flowing again. He also said that if the repo needed changes, we should just make them. The setup runs on AETERNUM. Discord Desktop loads a custom Vencord build: the upstream checkout is in `C:\Users\Estid\Documents\Codex\2026-10-19\referenced-chatgpt-conversation-this-is-an\work\Vencord-reference`, and the MessageCollector userplugin comes from this repo. The "Repair Vencord" scheduled task (`C:\automation\Vencord\RepairVencord.ps1`, log `C:\automation\Vencord\repair.log`) keeps that build current. The plugin's always-on capture pushes records through its native helper to personal-coordination-mcp on `127.0.0.1:4320`. That receiver is restarted at startup and midnight by the "Discord Messages MCP - Startup and Midnight" task. Credentials live only in `C:\Users\Estid\AppData\Local\PersonalCoordination\<app>.secret` and in the OS-protected plugin storage, so refer to them by path only.
+
+**Root cause:** in the receiver's audit table, the last successful ingest was Oct 25, 2026 at 2:27 PM CDT. The Discord session that was running had started on Oct 24 and stayed up the whole time. The receiver and the grants were healthy. Live capture is fail-closed: an unexpected client event, a save error, or a full queue stops capture and locks the buffer. `AlwaysOn.restore()` only ever ran once per account per Discord launch (`attempted === account`), so after a stop like that, collection and sync stayed off until Discord was fully restarted. Because the restart tasks cover only the receiver, not Discord, ingestion silently stopped.
+
+**Fix:** when an always-on session that was running stops underneath itself, `AlwaysOn.restore()` now resumes it in the same session with backoff: 1 min, doubling, capped at 15 min, and reset after an hour of healthy capture. A resume re-runs exactly the checks a restart does: the same account, the saved grant, a continuous grant, and not revoked. Disable, an account change, shutdown, and a failed restore never auto-resume. The stop reason (never message content) is logged to the Discord console as `[MessageCollector] capture stopped...` and shown in the panel notice. Security design is unchanged otherwise. Message text is still data only, the MCP stays read-only, and no plaintext credentials are added. One behavior change to flag: before, a fail-closed stop stayed stopped until the next Discord restart. Now it auto-resumes within the session after backoff.
+
+## Checklist
+- [x] Diagnose (receiver healthy on 4320; Vencord at latest upstream 443688b / 1.15.13; last ingest Oct 25, 2026 2:27 PM CDT)
+- [x] Auto-resume fix + tests (`tests/always-on.test.ts`), `npm run check` passes (78 tests)
+- [ ] PR merged into `expanded-capture-readonly` (the deployed branch)
+- [ ] Discord updated, Vencord rebuilt with the fixed plugin, Discord restarted on the custom build
+- [ ] New messages verified in the receiver audit/DB after the restart
+- [ ] Left for Ethan: `master` still lags the deployed branch (PRs #1 and #2 are open and stacked under `expanded-capture-readonly`); decide whether to merge that stack into `master`.
+
+_Last updated: 2026-10-29 (CDT)_
