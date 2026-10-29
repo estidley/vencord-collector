@@ -114,6 +114,10 @@ try {
         }
     }
 
+    # Re-observe Discord AFTER any recovery so the health file reports what is true now, not the pre-recovery snapshot.
+    $discord = @(Get-Process -Name Discord -ErrorAction SilentlyContinue); $running = $discord.Count -gt 0; $discordVer = $null
+    if ($running) { $p = ($discord | Where-Object { $_.Path } | Select-Object -First 1).Path; if ($p -match 'app-([0-9.]+)') { $discordVer = $Matches[1] } }
+
     $out = [ordered]@{
         schema = 1
         checkedAt = Iso $now
