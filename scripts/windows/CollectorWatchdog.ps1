@@ -32,6 +32,10 @@ $port     = 4320
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force $logDir | Out-Null }
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz') - $m" | Out-File -Append -Encoding utf8 $log }
 function Iso($d) { if ($d) { $d.ToString('o') } else { $null } }
+function Wait-Discord([int]$seconds) {
+    for ($i = 0; $i -lt $seconds; $i += 3) { if (Get-Process -Name Discord -ErrorAction SilentlyContinue) { return $true }; Start-Sleep 3 }
+    return [bool](Get-Process -Name Discord -ErrorAction SilentlyContinue)
+}
 function ParseUtc($s) { if ($s) { [DateTimeOffset]::Parse($s).LocalDateTime } else { $null } }
 
 $mutex = New-Object System.Threading.Mutex($false, 'Global\EthanCollectorWatchdog')
@@ -82,17 +86,31 @@ try {
         else {
             if ($running) { Log "RECOVER: stopping Discord ($state)"; $discord | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep 4 }
             # RepairVencord re-patches the newest Discord onto the custom build if an update wiped it, then launches Discord.
+            # Native-command failures do not throw, so never trust the launch: confirm Discord is actually back.
+            $via = $null
             if (Test-Path $repair) {
                 Log 'RECOVER: running RepairVencord.ps1 (re-patch if needed, then launch Discord)'
-                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $repair | Out-Null
-                $action = 'restarted Discord via RepairVencord.ps1'
-            } else {
-                Start-Process $updater -ArgumentList '--processStart Discord.exe'
-                $action = 'restarted Discord via Update.exe'
+                try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $repair | Out-Null } catch { Log "WARN RepairVencord.ps1 threw: $_" }
+                if (Wait-Discord 60) { $via = 'RepairVencord.ps1' } else { Log "WARN RepairVencord.ps1 exit=$LASTEXITCODE but Discord did not start; trying Update.exe" }
             }
-            $st.lastRecoveryAt = Iso (Get-Date); $st.lastRecoveryAction = $action
+            if (-not $via) {
+                try { Start-Process $updater -ArgumentList '--processStart Discord.exe' -ErrorAction Stop } catch { Log "WARN Update.exe launch failed: $_" }
+                if (Wait-Discord 45) { $via = 'Update.exe' }
+            }
             $st.consecutiveRecoveries = [int]$st.consecutiveRecoveries + 1
-            $state = 'recovering'; $msg = "$msg Recovery started: $action."
+            if ($via) {
+                # Only a confirmed relaunch starts the cooldown, giving the plugin time to restore and heartbeat.
+                $action = "restarted Discord via $via"
+                $st.lastRecoveryAt = Iso (Get-Date); $st.lastRecoveryAction = $action
+                $state = 'recovering'; $msg = "$msg Recovery: $action (confirmed running)."
+            } else {
+                # Discord is down and we could not bring it back. No cooldown, so the next run retries;
+                # consecutiveRecoveries still climbs so this ends in needs-attention instead of looping forever.
+                $action = 'relaunch FAILED (Discord not running after RepairVencord.ps1 and Update.exe)'
+                $st.lastRecoveryAction = $action; $st.lastRecoveryAt = $null   # clear any cooldown: next run must retry
+                $state = 'recovery-failed'; $msg = "$msg Recovery failed: Discord did not start. Will retry next run."
+                Log "ERROR $action"
+            }
         }
     }
 
@@ -100,7 +118,7 @@ try {
         schema = 1
         checkedAt = Iso $now
         healthy = $healthy
-        state = $state            # ok | stale | recovering | discord-not-running | receiver-down | needs-attention | unknown
+        state = $state            # ok | stale | recovering | recovery-failed | discord-not-running | receiver-down | needs-attention | unknown
         message = $msg
         discordRunning = $running
         discordVersion = $discordVer

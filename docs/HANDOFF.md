@@ -30,7 +30,7 @@ Ethan followed up: "I don't want to miss any messages that's important to me." T
 - Task **"Discord Collector Watchdog"**, every 15 min plus at logon, runs as Ethan's interactive user via `conhost --headless` (no console flash). Deployed copy: `C:\automation\Vencord\CollectorWatchdog.ps1` (+ `collector-health-query.cjs`).
 - **Unhealthy** = Discord is running, the receiver is up, and there has been no ingest and no heartbeat for **> 20 min**. That is 4x the heartbeat, and longer than the plugin's own 15-min max self-resume, so the plugin gets to heal itself first.
 - **Recovery** = stop Discord, then run `RepairVencord.ps1`. That re-patches the newest Discord onto the custom build if an update wiped it, then launches Discord. If Discord isn't running at all, it is relaunched the same way.
-- **Safety limits:** at most one recovery per 60 min. After 3 consecutive recoveries that don't restore health, auto-restart stops and the state becomes `needs-attention`. If the receiver is down (`receiver-down`), Discord is left alone, because the receiver has its own supervisor. Pass `-NoRestart` to only report.
+- **Safety limits:** a relaunch is confirmed by polling for the Discord process (with an `Update.exe` fallback). Only a confirmed relaunch starts the 60-min cooldown. If Discord can't be brought back, the state is `recovery-failed` and the next run retries; this was a Bugbot finding on PR #5. Otherwise at most one recovery per 60 min. After 3 consecutive recoveries that don't restore health, auto-restart stops and the state becomes `needs-attention`. If the receiver is down (`receiver-down`), Discord is left alone, because the receiver has its own supervisor. Pass `-NoRestart` to only report.
 - **Flag:** a recovery restarts Discord, which drops an active voice call. It only fires after 20+ min of confirmed dead capture.
 
 ## Reading health remotely
@@ -38,7 +38,7 @@ File: `C:\Users\Estid\AppData\Local\PersonalCoordination\collector-health.json`.
 ```
 Get-Content "$env:LOCALAPPDATA\PersonalCoordination\collector-health.json" | ConvertFrom-Json
 ```
-- `state`: `ok` | `stale` | `recovering` | `discord-not-running` | `receiver-down` | `needs-attention` | `unknown`. Alert on anything other than `ok` (and `recovering` that persists).
+- `state`: `ok` | `stale` | `recovering` | `recovery-failed` | `discord-not-running` | `receiver-down` | `needs-attention` | `unknown`. Alert on anything other than `ok` (and `recovering` that persists).
 - `checkedAt`: if it's older than about 35 min, the watchdog itself isn't running (machine asleep/off/logged out). Treat that as unknown and alert.
 - Log: `C:\Users\Estid\AppData\Local\PersonalCoordination\logs\collector-watchdog.log`.
 
