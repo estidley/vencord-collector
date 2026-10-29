@@ -9,9 +9,9 @@ On Oct 29, 2026, Ethan reported that the read-only "Discord messages" MCP had st
 ## Checklist
 - [x] Diagnose (receiver healthy on 4320; Vencord at latest upstream 443688b / 1.15.13; last ingest Oct 25, 2026 2:27 PM CDT)
 - [x] Auto-resume fix + tests (`tests/always-on.test.ts`), `npm run check` passes (78 tests)
-- [ ] PR merged into `expanded-capture-readonly` (the deployed branch)
-- [ ] Discord updated, Vencord rebuilt with the fixed plugin, Discord restarted on the custom build
-- [ ] New messages verified in the receiver audit/DB after the restart
+- [x] PR #3 merged into `expanded-capture-readonly` (the deployed branch); CI green
+- [x] Discord on latest stable host 1.0.9266 (was running stale 1.0.9265 session since Oct 24); Vencord 443688b (1.15.13, latest upstream) rebuilt with the fixed plugin via RepairVencord.ps1; Discord restarted on the custom build
+- [x] New messages verified: ingest resumed Oct 29, 2026 12:36 PM CDT; latest ingest after rebuild 12:40 PM CDT (receiver audit table)
 - [ ] Left for Ethan: `master` still lags the deployed branch (PRs #1 and #2 are open and stacked under `expanded-capture-readonly`); decide whether to merge that stack into `master`.
 
-_Last updated: 2026-10-29 (CDT)_
+_Last updated: 2026-10-29 12:45 PM CDT_
