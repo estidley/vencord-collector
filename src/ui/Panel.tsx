@@ -1,7 +1,7 @@
 import type * as ReactTypes from "react";
 import { Collector } from "../core/collector";
 import type { LiveCapture } from "../core/live";
-import type { AlwaysOn } from "../core/always-on";
+import { alwaysOnNotice, type AlwaysOn } from "../core/always-on";
 import type { SyncController } from "../core/sync";
 import { grantExpiry, MAX_INPUT_BYTES, parseJson } from "../core/schema";
 import { createCaptureExtras } from "./CaptureExtras";
@@ -95,7 +95,7 @@ export function createPanel(React: Pick<typeof ReactTypes, "createElement" | "us
             <p>{always ? "Enter your password once and accept to collect automatically whenever Discord is open." : live ? "Choose file imports or explicitly start live capture for selected conversations. No history fetching." : "Import files you choose into an encrypted local buffer. For live capture, install the Vencord plugin and open its settings inside Discord. This browser app cannot see Discord messages."}</p>
             {live && <p>Vencord is an unofficial client modification and violates Discord's Terms of Service. Participant permission does not provide platform approval.</p>}
             {liveStatus && <p aria-live="polite">{liveStatus.active ? `Live: ${liveStatus.allConversations ? "ALL conversations on this account" : `${liveStatus.grantIds.length} conversation(s)`}, ${liveStatus.saved} changes saved. ${liveStatus.continuous ? "Continuous — no session time limit." : `Ends ${new Date(liveStatus.endsAt!).toLocaleTimeString()}.`}` : liveStatus.notice}</p>}
-            {always && <div><p aria-live="polite">{autoStatus?.busy ? "Preparing automatic collection…" : autoStatus?.enabled && !liveStatus?.active ? "Automatic collection is paused. Review the capture status above before restarting it." : autoStatus?.notice}</p>
+            {always && <div><p aria-live="polite">{alwaysOnNotice(autoStatus, liveStatus?.active)}</p>
                 {(autoStatus?.busy || autoStatus?.enabled || liveStatus?.active || autoStatus?.notice !== "Always-on collection is off.") && <button onClick={() => void run(async () => { await always.disable(); return "Collection stopped. It will stay off after restarting Discord."; })}>Stop collecting and forget password</button>}</div>}
             {sync && syncStatus?.configured && <div><p aria-live="polite" data-testid="sync-status">Receiver sync: {syncStatus.message} {syncStatus.pending} pending · {syncStatus.delivered} delivered{syncStatus.refused ? ` · ${syncStatus.refused} set aside` : ""}{syncStatus.lastDeliveredAt ? ` · last ${new Date(syncStatus.lastDeliveredAt).toLocaleTimeString()}` : ""}</p>
                 <button disabled={syncStatus.state === "syncing"} onClick={() => { void sync.syncNow().then(() => setSyncStatus(sync.status())); }}>Sync now</button></div>}

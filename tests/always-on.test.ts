@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Collector } from "../src/core/collector";
 import { LiveCapture } from "../src/core/live";
-import { AlwaysOn, MAX_RESUME_DELAY, RESUME_DELAY } from "../src/core/always-on";
+import { AlwaysOn, MAX_RESUME_DELAY, PAUSED_NOTICE, RESUME_DELAY, alwaysOnNotice } from "../src/core/always-on";
 import type { AutoConfig, AutoProtection } from "../src/core/auto-config";
 import { grantDraftSchema, type State } from "../src/core/schema";
 import { decodeBatch } from "../src/core/connector";
@@ -147,4 +147,35 @@ test("disable, revoke, and account change never auto-resume", async () => {
     third.account("999"); await third.auto.restore(); third.advance(MAX_RESUME_DELAY * 2); await third.auto.restore();
     assert.equal(third.live.active, false); assert.equal(third.c.unlocked, false);
     void c; void account;
+});
+
+test("the panel shows the scheduled auto-resume notice instead of the generic paused message", async () => {
+    const { auto, live, emit, advance } = await setup();
+    await auto.enable(PASSWORD, true, true); await emit();
+    live.stop("Unexpected client event. Capture stopped; review compatibility before restarting.");
+    // Stopped but restore() has not run yet: nothing is scheduled, so the generic paused message is correct.
+    assert.equal(alwaysOnNotice(auto.status(), live.active), PAUSED_NOTICE);
+    await auto.restore();
+    const shown = alwaysOnNotice(auto.status(), live.active)!;
+    assert.match(shown, /Collection stopped \(Unexpected client event/); assert.match(shown, /Resuming automatically at /);
+    advance(RESUME_DELAY); await auto.restore(); assert.equal(live.active, true);
+    assert.match(alwaysOnNotice(auto.status(), live.active)!, /Always-on restored/);
+    assert.equal(alwaysOnNotice({ ...auto.status(), busy: true }, live.active), "Preparing automatic collection…");
+    await auto.disable(); assert.match(alwaysOnNotice(auto.status(), live.active)!, /Always-on disabled/);
+});
+
+test("enabling again clears a previously scheduled resume, so the next stop waits the full first delay", async () => {
+    const { auto, live, c, emit, advance } = await setup();
+    await auto.enable(PASSWORD, true, true); await emit();
+    live.stop("Unexpected client event."); await auto.restore();
+    assert.ok(auto.status().resumeAt); assert.equal(live.active, false);
+    // The user unlocks and re-enables by hand before the scheduled resume fires.
+    await c.unlock(PASSWORD); await auto.enable(PASSWORD, true, true); assert.equal(live.active, true); assert.equal(auto.status().resumeAt, null);
+    advance(RESUME_DELAY * 2);
+    live.stop("Unexpected client event."); await auto.restore();
+    // Without the fix the stale resumeAt (already in the past) resumed immediately, skipping the backoff.
+    assert.equal(live.active, false); assert.equal(auto.status().resumeAt, NOW + RESUME_DELAY * 2 + RESUME_DELAY);
+    advance(RESUME_DELAY - 1); await auto.restore(); assert.equal(live.active, false);
+    advance(1); await auto.restore(); assert.equal(live.active, true);
+    await auto.disable();
 });
