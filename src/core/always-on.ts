@@ -9,6 +9,14 @@ import type { SyncController } from "./sync";
 // event or a save error), resume it in-session with backoff instead of waiting for the next Discord restart.
 // Resuming re-runs exactly the restart-time checks: same account, same saved grant, continuous and not revoked.
 export const RESUME_DELAY = 60_000, MAX_RESUME_DELAY = 15 * 60_000, RESUME_RESET = 60 * 60_000;
+export const PAUSED_NOTICE = "Automatic collection is paused. Review the capture status above before restarting it.";
+
+/** The always-on line the panel shows. A scheduled automatic resume keeps its own notice (stop reason and resume time). */
+export function alwaysOnNotice(auto: { busy: boolean; enabled: boolean; notice: string; resumeAt: number | null } | undefined, liveActive: boolean | undefined) {
+    if (auto?.busy) return "Preparing automatic collection…";
+    if (auto?.enabled && !liveActive && !auto.resumeAt) return PAUSED_NOTICE;
+    return auto?.notice;
+}
 
 /** No plaintext credential is retained on this controller or placed in settings. */
 export class AlwaysOn {
@@ -73,7 +81,8 @@ export class AlwaysOn {
                 const encrypted = await native.protect({ version: 1, accountId: account, grantId: grant.grantId, passphrase });
                 this.check(generation, account); await this.storage.writeAuto(encrypted); this.check(generation, account);
                 await this.live.start(grant.grantId, true, true); this.check(generation, account);
-                this.enabled = true; this.runningGrant = grant.grantId; this.attempted = account; this.startedAt = this.clock(); this.resumes = 0;
+                // A fresh enable starts a fresh backoff: drop any resume scheduled by an earlier stop.
+                this.enabled = true; this.runningGrant = grant.grantId; this.attempted = account; this.startedAt = this.clock(); this.resumes = 0; this.resumeAt = 0;
                 this.notice = setup ? "Always-on enabled with receiver sync. Collection and sync resume whenever Discord opens."
                     : "Always-on enabled. Collection resumes for this account whenever Discord opens.";
             } catch (error) {

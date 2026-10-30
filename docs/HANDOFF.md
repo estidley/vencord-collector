@@ -30,7 +30,7 @@ Ethan followed up: "I don't want to miss any messages that's important to me." T
 - Task **"Discord Collector Watchdog"**, every 15 min plus at logon, runs as Ethan's interactive user via `conhost --headless` (no console flash). Deployed copy: `C:\automation\Vencord\CollectorWatchdog.ps1` (+ `collector-health-query.cjs`).
 - **Unhealthy** = Discord is running, the receiver is up, and there has been no ingest and no heartbeat for **> 20 min**. That is 4x the heartbeat, and longer than the plugin's own 15-min max self-resume, so the plugin gets to heal itself first.
 - **Recovery** = stop Discord, then run `RepairVencord.ps1`. That re-patches the newest Discord onto the custom build if an update wiped it, then launches Discord. If Discord isn't running at all, it is relaunched the same way.
-- **Safety limits:** a relaunch is confirmed by polling for the Discord process (with an `Update.exe` fallback). Only a confirmed relaunch starts the 60-min cooldown. If Discord can't be brought back, the state is `recovery-failed` and the next run retries; this was a Bugbot finding on PR #5. Otherwise at most one recovery per 60 min. After 3 consecutive recoveries that don't restore health, auto-restart stops and the state becomes `needs-attention`. If the receiver is down (`receiver-down`), Discord is left alone, because the receiver has its own supervisor. Pass `-NoRestart` to only report.
+- **Safety limits:** a relaunch is confirmed by polling for the Discord process (with an `Update.exe` fallback). Only a confirmed relaunch starts the cooldown (60 min in round 2; 5 min after round 3, see below). If Discord can't be brought back, the state is `recovery-failed` and the next run retries; this was a Bugbot finding on PR #5. Otherwise at most one recovery per 60 min. After 3 consecutive recoveries that don't restore health, auto-restart stops and the state becomes `needs-attention`. If the receiver is down (`receiver-down`), Discord is left alone, because the receiver has its own supervisor. Pass `-NoRestart` to only report.
 - **Flag:** a recovery restarts Discord, which drops an active voice call. It only fires after 20+ min of confirmed dead capture.
 
 ## Reading health remotely
@@ -53,3 +53,28 @@ In Discord: open each important DM or group DM from Oct 25 to 29 (and Inbox → 
 - [x] Task "Discord Collector Watchdog" registered (every 15 min + at logon, headless); first run result 0, state `ok`. The watchdog state file was reset after the deploy test.
 
 _Last updated: 2026-10-29 2:10 PM CDT_
+---
+
+# HANDOFF (round 3, Oct 29, 2026): Bugbot follow-ups, 5-minute watchdog cooldown, resume notice
+
+Ethan's email liaison passed on four Cursor Bugbot findings from PRs #3 and #5 and asked which were already fixed. His instructions: make the watchdog cooldown about 5 minutes instead of 60; fix the stale `discordRunning` in the health file if it is still there; fix the panel hiding the "resuming automatically at ..." notice; fix `enable` keeping an old scheduled resume. The goal is that a collector outage heals quickly and the panel tells him honestly when capture will come back. Same rules as before: a new branch and PR off `expanded-capture-readonly`, no merge and no deploy until Ethan approves, AETERNUM and its scheduled tasks are not touched, and secrets are referenced by path only (`C:\Users\Estid\AppData\Local\PersonalCoordination\<app>.secret`, OS-protected plugin storage).
+
+**Status of each finding**
+1. **PR #5 HIGH, "cooldown starts after a failed relaunch":** already fixed before PR #5 merged, in commit `e72aa58` (now on `expanded-capture-readonly`). A failed relaunch sets no cooldown and is reported as `recovery-failed`. This round: the default cooldown is now **5 min** (`-CooldownMinutes`, still configurable). RepairVencord's exit code is checked and logged. Success now requires a **fresh** Discord process, started after the recovery began, that is still running about 10 s later. Before, any leftover Discord process counted as success. Failures still count toward the 3-strike `needs-attention` stop.
+2. **PR #5 LOW, "health file keeps stale Discord status":** already fixed in `40b06af` (on `expanded-capture-readonly`). Discord is observed again after recovery and before the health file is written. This round adds a regression test.
+3. **PR #3 MEDIUM, "panel hides scheduled resume notice":** was still present; now fixed. The panel line comes from `alwaysOnNotice()` in `src/core/always-on.ts`. When a resume is scheduled, it shows the stop reason and resume time instead of the generic "paused" text.
+4. **PR #3 LOW, "enable leaves stale resume timestamp":** was still present; now fixed. A successful `enable` clears `resumeAt`, so the next stop starts the backoff fresh at 1 min. There is no separate timer to clear, because resume is driven by the plugin's 1-second poll.
+
+Also hardened in the watchdog: timestamps parse correctly under PowerShell 7 as well as 5.1, and a state file that is missing a field no longer aborts the run.
+
+**Behavior change to flag:** the scheduled task runs every 15 min, so a 5-min cooldown means a still-dead capture is retried on the next run instead of waiting an hour. Each retry restarts Discord, which drops a voice call. It still stops after 3 recoveries that don't restore health (`needs-attention`).
+
+## Checklist (round 3)
+- [x] Checked each finding against `expanded-capture-readonly` (#1 and #2 already fixed in `e72aa58` and `40b06af`; #3 and #4 were still present)
+- [x] Watchdog: 5-min default cooldown, exit-code check, fresh-process confirmation, PS7 timestamp fix, state-file hardening
+- [x] Panel resume notice (#3) and enable clearing `resumeAt` (#4)
+- [x] Tests: `tests/always-on.test.ts` (+2) and new `tests/watchdog.test.ts` (9 tests; behavioral tests run the real script under `pwsh` with every process and network call mocked, and skip when `pwsh` is missing). `npm run check` passes 90/90 with `pwsh` installed
+- [ ] Left for Ethan: review and merge the PR into `expanded-capture-readonly`
+- [ ] After approval: copy `scripts/windows/CollectorWatchdog.ps1` to `C:\automation\Vencord\CollectorWatchdog.ps1` (the scheduled task picks it up on its next run), and rebuild Vencord with the plugin through `RepairVencord.ps1` so the panel and enable fixes load
+
+_Last updated: 2026-10-29 7:21 PM CDT_

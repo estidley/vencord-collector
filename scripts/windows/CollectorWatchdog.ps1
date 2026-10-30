@@ -11,7 +11,7 @@
 #          %LOCALAPPDATA%\PersonalCoordination\logs\collector-watchdog.log (one line per check)
 param(
     [int]$StaleMinutes = 20,          # 4x the 5-min heartbeat; also longer than the plugin's own 15-min max self-resume
-    [int]$CooldownMinutes = 60,       # at most one recovery per hour
+    [int]$CooldownMinutes = 5,        # wait after a CONFIRMED relaunch so the plugin can restore and heartbeat (failed relaunches set no cooldown)
     [int]$MaxRecoveries = 3,          # consecutive recoveries without regaining health before we stop and ask for help
     [switch]$NoRestart                # report only; never stop/start Discord
 )
@@ -32,11 +32,25 @@ $port     = 4320
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force $logDir | Out-Null }
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz') - $m" | Out-File -Append -Encoding utf8 $log }
 function Iso($d) { if ($d) { $d.ToString('o') } else { $null } }
-function Wait-Discord([int]$seconds) {
-    for ($i = 0; $i -lt $seconds; $i += 3) { if (Get-Process -Name Discord -ErrorAction SilentlyContinue) { return $true }; Start-Sleep 3 }
-    return [bool](Get-Process -Name Discord -ErrorAction SilentlyContinue)
+# A Discord process that started at/after $since (so a straggler from before the force-stop never counts as "relaunched").
+function Test-FreshDiscord($since) {
+    foreach ($p in @(Get-Process -Name Discord -ErrorAction SilentlyContinue)) {
+        $t = $null; try { $t = $p.StartTime } catch {}
+        if ($t -and $t -ge $since) { return $true }
+    }
+    return $false
 }
-function ParseUtc($s) { if ($s) { [DateTimeOffset]::Parse($s).LocalDateTime } else { $null } }
+# Poll for a fresh Discord, then re-check after a short settle so a launch that crashes straight away is not "success".
+function Wait-Discord([int]$seconds, $since) {
+    for ($i = 0; $i -lt $seconds; $i += 3) {
+        if (Test-FreshDiscord $since) { Start-Sleep 10; return (Test-FreshDiscord $since) }
+        Start-Sleep 3
+    }
+    return (Test-FreshDiscord $since)
+}
+# PowerShell 7's ConvertFrom-Json already turns ISO strings into DateTime (5.1 leaves strings); accept both so a UTC
+# timestamp is never re-read as local time.
+function ParseUtc($s) { if ($s -is [datetime]) { $s.ToLocalTime() } elseif ($s) { [DateTimeOffset]::Parse($s).LocalDateTime } else { $null } }
 
 $mutex = New-Object System.Threading.Mutex($false, 'Global\EthanCollectorWatchdog')
 if (-not $mutex.WaitOne(0)) { Log 'Another watchdog run is in progress - exiting'; exit }
@@ -45,6 +59,8 @@ try {
     # ---- persisted recovery counters (our own small file) ----
     $st = [pscustomobject]@{ lastRecoveryAt = $null; consecutiveRecoveries = 0; lastRecoveryAction = $null }
     if (Test-Path $stateF) { try { $st = Get-Content $stateF -Raw | ConvertFrom-Json } catch {} }
+    # A hand-edited or older state file may lack a field; add it so later assignments cannot throw.
+    foreach ($k in 'lastRecoveryAt', 'consecutiveRecoveries', 'lastRecoveryAction') { if ($st.PSObject.Properties.Name -notcontains $k) { $st | Add-Member -NotePropertyName $k -NotePropertyValue $null } }
     $lastRecovery = ParseUtc $st.lastRecoveryAt
 
     # ---- observe ----
@@ -84,22 +100,27 @@ try {
         }
         elseif (-not $cool) { $action = "waiting (cooldown, last recovery $(Iso $lastRecovery))" }
         else {
+            $recoverStart = (Get-Date).AddSeconds(-1)
             if ($running) { Log "RECOVER: stopping Discord ($state)"; $discord | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep 4 }
             # RepairVencord re-patches the newest Discord onto the custom build if an update wiped it, then launches Discord.
             # Native-command failures do not throw, so never trust the launch: confirm Discord is actually back.
             $via = $null
             if (Test-Path $repair) {
                 Log 'RECOVER: running RepairVencord.ps1 (re-patch if needed, then launch Discord)'
-                try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $repair | Out-Null } catch { Log "WARN RepairVencord.ps1 threw: $_" }
-                if (Wait-Discord 60) { $via = 'RepairVencord.ps1' } else { Log "WARN RepairVencord.ps1 exit=$LASTEXITCODE but Discord did not start; trying Update.exe" }
+                $repairExit = $null
+                try { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $repair | Out-Null; $repairExit = $LASTEXITCODE } catch { Log "WARN RepairVencord.ps1 threw: $_" }
+                if ($repairExit -ne 0) { Log "WARN RepairVencord.ps1 did not report success (exit=$repairExit)" }
+                # Success = Discord actually came back as a fresh process; the exit code alone is not trusted either way.
+                if (Wait-Discord 60 $recoverStart) { $via = 'RepairVencord.ps1'; if ($repairExit -ne 0) { $via = "RepairVencord.ps1 (exit=$repairExit, Discord confirmed running)" } }
+                else { Log "WARN RepairVencord.ps1 exit=$repairExit but Discord did not start; trying Update.exe" }
             }
             if (-not $via) {
                 try { Start-Process $updater -ArgumentList '--processStart Discord.exe' -ErrorAction Stop } catch { Log "WARN Update.exe launch failed: $_" }
-                if (Wait-Discord 45) { $via = 'Update.exe' }
+                if (Wait-Discord 45 $recoverStart) { $via = 'Update.exe' }
             }
             $st.consecutiveRecoveries = [int]$st.consecutiveRecoveries + 1
             if ($via) {
-                # Only a confirmed relaunch starts the cooldown, giving the plugin time to restore and heartbeat.
+                # Only a confirmed relaunch starts the (default 5-min) cooldown, giving the plugin time to restore and heartbeat.
                 $action = "restarted Discord via $via"
                 $st.lastRecoveryAt = Iso (Get-Date); $st.lastRecoveryAction = $action
                 $state = 'recovering'; $msg = "$msg Recovery: $action (confirmed running)."
